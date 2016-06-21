@@ -19,34 +19,32 @@ def _xavier_init(fan_in, fan_out, constant=1):
 
 class SimpleAutoencoder(object):
     """
-    Autoencoder without tied weights.
+    Autoencoder implementation based on inputs from https://jmetzen.github.io/2015-11-27/vae.html.
+    See the project README on how to use it.
     """
 
     def __init__(self,
                  network_architecture,
                  transfer_fct=tf.nn.tanh,
-                 # learning_rate=0.001,
                  batch_size=100,
                  weight_regularization=0.0,
+                 bias_regularization=0.0,
                  tied=False):
-
-        try:
-            if self.sess._opened:
-                print "re-initializing encoder"
-                self.sess.close()
-        except AttributeError:
-            print "intializing encoder"
 
         self.network_architecture = network_architecture
         self.transfer_fct = transfer_fct
         self.batch_size = batch_size
-        self.tied = tied
         self.weight_regularization = weight_regularization
-        self.learning_cost = []
+        self.bias_regularization = bias_regularization
+        self.tied = tied
+        self._encoder_layers = []
+        self._decoder_layers = []
+        self._recording = {'epoch': 0,
+                           'learning_rate_schedule': dict(),
+                           'batch_cost': []}
 
         # tf Graph input
         self.learning_rate = tf.placeholder(tf.float32, shape=[])
-        self.keep_prob = tf.placeholder(tf.float32)
         self.x = tf.placeholder(tf.float32, [None, network_architecture["n_input"]])
         self._create_network()
 
@@ -68,18 +66,52 @@ class SimpleAutoencoder(object):
         # Initialize autoencoder network weights and biases
         self.network_weights = self._initialize_weights(self.network_architecture, self.tied)
 
-        self.x_encoded = self._encoder_network(self.network_weights["weights_encoder"],
-                                               self.network_weights["biases_encoder"])
-
         if self.tied:
-            self.x_decoded = self._decoder_network(self.network_weights["weights_encoder"],
+            self.x_encoded, self.x_decoded = self._tied_encoder_network(self.network_weights["weights_encoder"],
+                                                                        self.network_weights["biases_encoder"],
+                                                                        self.network_weights["biases_decoder"])
+
+        else:
+
+            assert 'decoder' in self.network_architecture.keys(), "Need to provide decoder network layer configuration for untied encoder."
+
+            self.x_encoded = self._encoder_network(self.network_weights["weights_encoder"],
                                                    self.network_weights["biases_encoder"])
 
-        elif 'decoder' in self.network_weights.keys():
             self.x_decoded = self._decoder_network(self.network_weights["weights_decoder"],
                                                    self.network_weights["biases_decoder"])
+
+
+    @staticmethod
+    def _create_matrix_and_bias_sizes(n_input, lst_of_encoder_layer_sizes, n_compressed):
+        matrix_dims = zip([n_input] + lst_of_encoder_layer_sizes, lst_of_encoder_layer_sizes + [n_compressed])
+        bias_dims = [tup[1] for tup in matrix_dims]
+        return matrix_dims, bias_dims
+
+    @staticmethod
+    def _create_layers(component, lst_of_component_layer_sizes, n_input, n_compressed):
+
+        all_weights = dict()
+        if len(lst_of_component_layer_sizes) > 0:
+
+            matrix_dims, bias_dims = SimpleAutoencoder._create_matrix_and_bias_sizes(n_input,
+                                                                                     lst_of_component_layer_sizes,
+                                                                                     n_compressed)
+            all_weights['weights_{}'.format(component)] = dict()
+            all_weights['biases_{}'.format(component)] = dict()
+
+            for idx, dim in enumerate(matrix_dims):
+                print "{} layer {}, dimensionality {} -> {}".format(component, idx + 1, dim[0], dim[1])
+                all_weights['weights_{}'.format(component)].update(
+                    {'h{}'.format(idx + 1): tf.Variable(_xavier_init(dim[0], dim[1]))})
+
+                all_weights['biases_{}'.format(component)].update(
+                    {'b{}'.format(idx + 1): tf.Variable(tf.zeros([bias_dims[idx]], dtype=tf.float32))})
+
+            return all_weights
+
         else:
-            raise NotImplementedError, 'tied autoencoder not implemented. need to provide decoder network layers.'
+            raise AttributeError("need list of {} layer sizes".format(component))
 
     @staticmethod
     def _initialize_weights(architecture_dict, tied):
@@ -87,137 +119,99 @@ class SimpleAutoencoder(object):
         all_weights = dict()
 
         n_input = architecture_dict.get('n_input')
-        if architecture_dict.has_key('encoder'):
+        n_compressed = architecture_dict.get('n_compressed')
+        all_weights.update(SimpleAutoencoder._create_layers('encoder', architecture_dict.get('encoder'), n_input, n_compressed))
 
-            lst_of_encoder_layer_sizes = list(architecture_dict.get('encoder'))
-            all_weights['weights_encoder'] = dict()
-            all_weights['biases_encoder'] = dict()
+        if tied:
+            lst_of_dims = architecture_dict.get('encoder')
 
-            for idx in range(len(lst_of_encoder_layer_sizes)):
-                if idx == 0:
-                    print "encoder layer {}, dimensionality {} -> {}".format(idx +1, n_input, lst_of_encoder_layer_sizes[idx])
-                    all_weights['weights_encoder'].update({'h{}'.format(idx+1): tf.Variable(_xavier_init(n_input, lst_of_encoder_layer_sizes[idx]))})
-                else:
-                    print "encoder layer {}, dimensionality {} -> {}".format(idx + 1, lst_of_encoder_layer_sizes[idx-1], lst_of_encoder_layer_sizes[idx])
-                    all_weights['weights_encoder'].update(
-                        {'h{}'.format(idx + 1): tf.Variable(_xavier_init(lst_of_encoder_layer_sizes[idx - 1], lst_of_encoder_layer_sizes[idx]))})
-
-                all_weights['biases_encoder'].update({'b{}'.format(idx+1): tf.Variable(tf.zeros([lst_of_encoder_layer_sizes[idx]], dtype=tf.float32))})
+            # List `reverse` manipulates IN-PLACE and returns None. Hence we cannot put this inline :(
+            lst_of_dims.reverse()
+            all_weights.update(SimpleAutoencoder._create_layers('decoder', lst_of_dims, n_compressed, n_input))
 
         else:
-            raise AttributeError, "need list of encoder layer sizes"
+            assert 'decoder' in architecture_dict.keys(), "Need to provide decoder network layer configuration for untied encoder."
 
-        if ('decoder' in architecture_dict.keys()) & (not tied):
-
-            lst_of_decoder_layer_sizes = list(architecture_dict.get('decoder'))
-            all_weights['weights_decoder'] = dict()
-            all_weights['biases_decoder'] = dict()
-
-            for idx in range(len(lst_of_decoder_layer_sizes)):
-                if idx == 0:
-                    print 'decoder layer {}, dimensionality {} -> {} '.format(idx+1, lst_of_encoder_layer_sizes[-1], lst_of_decoder_layer_sizes[idx])
-                    all_weights['weights_decoder'].update({'h{}'.format(idx + 1): tf.Variable(_xavier_init(lst_of_encoder_layer_sizes[-1], lst_of_decoder_layer_sizes[idx]))})
-                    all_weights['biases_decoder'].update({'b{}'.format(idx + 1): tf.Variable(tf.zeros([lst_of_decoder_layer_sizes[idx]], dtype=tf.float32))})
-                else:
-                    print 'decoder layer {}, dimensionality {} -> {} '.format(idx + 1, lst_of_decoder_layer_sizes[idx - 1], lst_of_decoder_layer_sizes[idx])
-                    all_weights['weights_decoder'].update({'h{}'.format(idx + 1): tf.Variable(_xavier_init(lst_of_decoder_layer_sizes[idx - 1], lst_of_decoder_layer_sizes[idx]))})
-                    all_weights['biases_decoder'].update({'b{}'.format(idx + 1): tf.Variable(tf.zeros([lst_of_decoder_layer_sizes[idx]], dtype=tf.float32))})
-
-            if len(lst_of_decoder_layer_sizes) > 0:
-                print 'decoder layer {}, dimensionality {} -> {} '.format(len(lst_of_decoder_layer_sizes) + 1, lst_of_decoder_layer_sizes[-1], n_input)
-                all_weights['weights_decoder'].update(
-                    {'h{}'.format(len(lst_of_decoder_layer_sizes)+1): tf.Variable(_xavier_init(lst_of_decoder_layer_sizes[-1], n_input))})
-                all_weights['biases_decoder'].update(
-                    {'b{}'.format(len(lst_of_decoder_layer_sizes)+1): tf.Variable(tf.zeros([n_input], dtype=tf.float32))})
-            else:
-                print 'decoder layer {}, dimensionality {} -> {} '.format(len(lst_of_decoder_layer_sizes) + 1,
-                                                                          lst_of_encoder_layer_sizes[-1], n_input)
-                all_weights['weights_decoder'].update(
-                    {'h{}'.format(len(lst_of_decoder_layer_sizes) + 1): tf.Variable(
-                        _xavier_init(lst_of_encoder_layer_sizes[-1], n_input))})
-                all_weights['biases_decoder'].update(
-                    {'b{}'.format(len(lst_of_decoder_layer_sizes) + 1): tf.Variable(
-                        tf.zeros([n_input], dtype=tf.float32))})
-
-        elif tied & ('decoder' in architecture_dict.keys()):
-            raise AttributeError, "Can't have a tied autoencoder and specify a decoder network."
+            all_weights.update(SimpleAutoencoder._create_layers('decoder', architecture_dict.get('decoder'), n_compressed, n_input))
 
         return all_weights
 
+    def _tied_encoder_network(self, weights, biases_encoder, biases_decoder):
+
+        layers = []
+        for idx in range(len(weights)):
+            if idx == 0:
+                layers.append(self.transfer_fct(
+                    tf.add(tf.matmul(self.x, weights['h{}'.format(idx + 1)]), biases_encoder['b{}'.format(idx + 1)])))
+            else:
+                layers.append(self.transfer_fct(
+                    tf.add(tf.matmul(layers[idx - 1], weights['h{}'.format(idx + 1)]), biases_encoder['b{}'.format(idx + 1)])))
+
+        for idx in range(len(weights)):
+            if idx == 0:
+                layers.append(self.transfer_fct(
+                    tf.add(tf.matmul(layers[-1], weights['h{}'.format(len(weights) - idx)], transpose_b=True), biases_decoder['b{}'.format(idx + 1)])))
+            else:
+                layers.append(self.transfer_fct(
+                    tf.add(tf.matmul(layers[len(weights) + idx -1], weights['h{}'.format(len(weights) - idx)], transpose_b=True),
+                           biases_decoder['b{}'.format(idx + 1)])))
+
+        self._encoder_layers = layers[:len(weights)]
+        self._decoder_layers = layers[len(weights):]
+        return layers[len(weights) - 1], layers[-1]
+
     def _encoder_network(self, weights, biases):
-        # Generate probabilistic encoder (recognition network), which
-        # maps inputs onto a normal distribution in latent space.
-        # The transformation is parametrized and can be learned.
 
         layers = []
         for idx in range(len(weights)):
             if idx == 0:
                 layers.append(self.transfer_fct(tf.add(tf.matmul(self.x, weights['h{}'.format(idx + 1)]), biases['b{}'.format(idx +1)])))
-                layers.append(tf.nn.dropout(layers[-1], keep_prob=self.keep_prob))
             else:
                 layers.append(self.transfer_fct(tf.add(tf.matmul(layers[idx-1], weights['h{}'.format(idx + 1)]), biases['b{}'.format(idx +1)])))
 
+        self._encoder_layers = layers
         return layers[-1]
 
     def _decoder_network(self, weights, biases):
-        # Generate probabilistic decoder (decoder network), which
-        # maps points in latent space onto a Bernoulli distribution in data space.
-        # The transformation is parametrized and can be learned.
 
         layers = []
-        if self.tied:
-            for idx in range(len(weights)):
-                print "HERE", idx, len(weights)-1 -idx
-                print weights['h{}'.format(len(weights) - 0 - idx)].get_shape()
-                print biases['b{}'.format(len(weights) - 0 - idx)].get_shape()
-                if idx == 0:
-                    # layers.append(self.transfer_fct(
-                    #     tf.add(tf.matmul(self.x_encoded, weights['h{}'.format(len(weights) - 0 - idx)], transpose_b=True),
-                    #            biases['b{}'.format(len(weights) - 1 - idx)])))
+        for idx in range(len(weights)):
+            if idx == 0:
+                layers.append(self.transfer_fct(
+                    tf.add(tf.matmul(self.x_encoded, weights['h{}'.format(idx + 1)]), biases['b{}'.format(idx + 1)])))
+            else:
+                layers.append(self.transfer_fct(
+                    tf.add(tf.matmul(layers[idx - 1], weights['h{}'.format(idx + 1)]), biases['b{}'.format(idx + 1)])))
 
-                    layers.append(self.transfer_fct(
-                            tf.matmul(tf.sub(self.x_encoded, biases['b{}'.format(len(weights) - 0 - idx)]), weights['h{}'.format(len(weights) - 0 - idx)], transpose_b=True)))
-                            # biases['b{}'.format(len(weights) - 1 - idx)])))
-                else:
-                    # layers.append(self.transfer_fct(
-                    #     tf.add(tf.matmul(layers[len(weights) - 1 - idx], weights['h{}'.format(len(weights) - 0 - idx)], transpose_b=True),
-                    #            biases['b{}'.format(len(weights) - 1 - idx)])))
-
-                    layers.append(self.transfer_fct(
-                        tf.matmul(tf.sub(layers[len(weights) - 1 - idx], biases['b{}'.format(len(weights) - 0 - idx)]),
-                                  weights['h{}'.format(len(weights) - 0 - idx)], transpose_b=True)))
-
-        elif 'decoder' in self.network_architecture.keys():
-            for idx in range(len(weights)):
-                if idx == 0:
-                    layers.append(self.transfer_fct(
-                        tf.add(tf.matmul(self.x_encoded, weights['h{}'.format(idx + 1)]), biases['b{}'.format(idx + 1)])))
-                else:
-                    layers.append(self.transfer_fct(
-                        tf.add(tf.matmul(layers[idx - 1], weights['h{}'.format(idx + 1)]), biases['b{}'.format(idx + 1)])))
-        else:
-            raise NotImplementedError('Autoencoder either has to be tied or you need to provide a decoder network configuration.')
-
+        self._decoder_layers = layers
         return layers[-1]
 
     def _create_loss_optimizer(self):
-        # The loss is composed of two terms:
-        # 1.) The reconstruction loss
+
+        # The reconstruction loss
         reconstr_loss = tf.reduce_sum(tf.squared_difference(self.x, self.x_decoded))
 
+        # Weight matrix regularization loss
         weight_reg = 0
         for val in self.network_weights['weights_encoder'].itervalues():
-            weight_reg = tf.reduce_sum(val)
+            weight_reg += tf.reduce_sum(tf.square(val))
 
-        if not self.tied:
-            for val in self.network_weights['weights_decoder'].itervalues():
-                weight_reg += tf.reduce_sum(val)
+        for val in self.network_weights['weights_decoder'].itervalues():
+            weight_reg += tf.reduce_sum(tf.square(val))
 
-        self.cost = tf.reduce_mean(reconstr_loss) + self.weight_regularization * weight_reg / (2 * self.batch_size)
+        # Bias vector regularization loss
+        bias_reg = 0
+        for val in self.network_weights['biases_encoder'].itervalues():
+            bias_reg += tf.reduce_sum(tf.square(val))
+
+        for val in self.network_weights['biases_decoder'].itervalues():
+            bias_reg += tf.reduce_sum(tf.square(val))
+
+        self.cost = tf.reduce_mean(reconstr_loss) + (self.weight_regularization * weight_reg + self.bias_regularization * bias_reg) / (2 * self.batch_size)
 
         self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.learning_rate).minimize(self.cost)
 
-    def partial_fit(self, X, learning_rate = None, keep_prob = None):
+    def partial_fit(self, X, learning_rate=None):
         """Train model based on mini-batch of input data.
 
         Return cost of mini-batch.
@@ -225,55 +219,50 @@ class SimpleAutoencoder(object):
         if not learning_rate:
             self.learning_rate = 0.001
 
-        if not keep_prob:
-            self.keep_prob = 1.0
-
         opt, cost = self.sess.run((self.optimizer, self.cost),
-                                  feed_dict={self.x: X, self.learning_rate: learning_rate, self.keep_prob: keep_prob})
+                                  feed_dict={self.x: X, self.learning_rate: learning_rate})
         return cost
 
     def encode(self, X):
         """Transform data by mapping it into the latent space."""
-        # Note: This maps to mean of distribution, we could alternatively
-        # sample from Gaussian distribution
-        return self.sess.run(self.x_encoded, feed_dict={self.x: X, self.keep_prob: 1.0})
+        return self.sess.run(self.x_encoded, feed_dict={self.x: X})
 
     def decode(self, X):
-        """ Use VAE to reconstruct given data. """
-        return self.sess.run(self.x_decoded,
-                             feed_dict={self.x: X})
+        return self.sess.run(self.x_decoded, feed_dict={self.x: X})
 
     def _monitor_layer(self, X, layer_index, network='encoder'):
 
         if network == 'encoder':
-            weight_matrix = self.network_weights.get('weights_encoder').get('h{}'.format(layer_index))
-            biases = self.network_weights.get('biases_encoder').get('b{}'.format(layer_index))
-            layer_to_run = self.transfer_fct(tf.add(tf.matmul(self.x, weight_matrix), biases))
+            layer_to_run = self._encoder_layers[layer_index]
 
         elif network == 'decoder':
-            weight_matrix = self.network_weights.get('weights_decoder').get('h{}'.format(layer_index))
-            biases = self.network_weights.get('biases_decoder').get('b{}'.format(layer_index))
-            layer_to_run = self.transfer_fct(tf.add(tf.matmul(self.x_encoded, weight_matrix), biases))
+            layer_to_run = self._decoder_layers[layer_index]
 
         else:
-            raise AttributeError, "network '{}' does not exist".format(network)
+            raise AttributeError("network '{}' does not exist".format(network))
 
-        return self.sess.run(layer_to_run, feed_dict={self.x: X, self.keep_prob: 1.0})
+        return self.sess.run(layer_to_run, feed_dict={self.x: X})
 
-    @staticmethod
-    def _update_learning_rate(dct, epoch):
+    def _update_learning_rate(self, dct, epoch):
 
-        lr = np.PINF
-        for key in dct.iterkeys():
-            if int(key) <= epoch:
-                lr = dct[key]
-        return lr
+        epoch_key = max(k for k in dct if k <= epoch)
+        if self._recording['epoch'] <= 1:
+            self._current_lr = dct[epoch_key]
+            self._recording['learning_rate_schedule'].update({self._recording['epoch'] - 1: self._current_lr})
 
-    def train(self, X, n_epochs, learning_rate=0.0001, display_step=10, keep_prob=1.0):
+        if dct[epoch_key] != self._current_lr:
+            self._current_lr = dct[epoch_key]
+            self._recording['learning_rate_schedule'].update({self._recording['epoch'] - 1: self._current_lr})
+
+        return self._current_lr
+
+    def train(self, X, n_epochs, learning_rate=0.0001, display_step=10):
 
         data = DataSet(X, self.batch_size)
 
         for epoch in range(n_epochs):
+
+            self._recording['epoch'] += 1
 
             if isinstance(learning_rate, dict):
                 lr = self._update_learning_rate(learning_rate, epoch)
@@ -285,14 +274,14 @@ class SimpleAutoencoder(object):
 
             while data.has_next():
                 batch_xs = data.next_batch()
-                costs.append(self.partial_fit(batch_xs, lr, keep_prob))
+                costs.append(self.partial_fit(batch_xs, lr))
 
-            self.learning_cost.append(np.mean(costs))
+            self._recording['batch_cost'].append(np.mean(costs))
 
             # Display logs per epoch step
             if (epoch+1) % display_step == 0:
                 print "Epoch:", '{0:04d} / {1:04d}'.format(epoch + 1, n_epochs), \
-                    "cost=", "{:.9f}".format(self.learning_cost[-1])
+                    "cost=", "{:.9f}".format(self._recording['batch_cost'][-1])
 
 
 class DataSet(object):
@@ -317,182 +306,7 @@ class DataSet(object):
         return self.current_batch < self.total_batches
 
     def reset_counter(self):
+        # Shuffle data set on re-initialization
+        # Note that shuffle does this IN-PLACE. Sad :(
+        np.random.shuffle(self.data)
         self.current_batch = 0
-
-
-
-class VariationalAutoencoder(object):
-
-    def __init__(self,
-                 network_architecture,
-                 transfer_fct=tf.nn.softsign,
-                 learning_rate=0.001,
-                 batch_size=100):
-
-        if self.sess._opened:
-            self.sess.close()
-
-        self.network_architecture = network_architecture
-        self.transfer_fct = transfer_fct
-        self.learning_rate = learning_rate
-        self.batch_size = batch_size
-
-        # tf Graph input
-        self.x = tf.placeholder(tf.float32, [None, network_architecture["n_input"]])
-
-        # Create autoencoder network
-        self._create_network()
-
-        # Define loss function based variational upper-bound and
-        # corresponding optimizer
-        self._create_loss_optimizer()
-
-        # Initializing the tensor flow variables
-        init = tf.initialize_all_variables()
-
-        # Launch the session
-        self.sess = tf.InteractiveSession()
-        self.sess.run(init)
-
-    def _create_network(self):
-        # Initialize autoencode network weights and biases
-        network_weights = self._initialize_weights(**self.network_architecture)
-
-        # Use recognition network to determine mean and
-        # (log) variance of Gaussian distribution in latent
-        # space
-        self.z_mean, self.z_log_sigma_sq = self._encoder_network(network_weights["weights_recog"],
-                                                                 network_weights["biases_recog"])
-
-        # Draw one sample z from Gaussian distribution
-        n_z = self.network_architecture["n_z"]
-        eps = tf.random_normal((self.batch_size, n_z), 0, 1,
-                               dtype=tf.float32)
-        # z = mu + sigma*epsilon
-        self.z = tf.add(self.z_mean,
-                        tf.mul(tf.sqrt(tf.exp(self.z_log_sigma_sq)), eps))
-
-        # Use generator to determine mean of
-        # Bernoulli distribution of reconstructed input
-        self.x_reconstr_mean = self._decoder_network(network_weights["weights_gener"],
-                                                     network_weights["biases_gener"])
-
-    @staticmethod
-    def _initialize_weights(n_hidden_recog_1,
-                            n_hidden_recog_2,
-                            n_hidden_gener_1,
-                            n_hidden_gener_2,
-                            n_input,
-                            n_z):
-
-        all_weights = dict()
-        all_weights['weights_recog'] = {
-            'h1': tf.Variable(_xavier_init(n_input, n_hidden_recog_1)),
-            'h2': tf.Variable(_xavier_init(n_hidden_recog_1, n_hidden_recog_2)),
-            'out_mean': tf.Variable(_xavier_init(n_hidden_recog_2, n_z)),
-            'out_log_sigma': tf.Variable(_xavier_init(n_hidden_recog_2, n_z))}
-
-        all_weights['biases_recog'] = {
-            'b1': tf.Variable(tf.zeros([n_hidden_recog_1], dtype=tf.float32)),
-            'b2': tf.Variable(tf.zeros([n_hidden_recog_2], dtype=tf.float32)),
-            'out_mean': tf.Variable(tf.zeros([n_z], dtype=tf.float32)),
-            'out_log_sigma': tf.Variable(tf.zeros([n_z], dtype=tf.float32))}
-
-        all_weights['weights_gener'] = {
-            'h1': tf.Variable(_xavier_init(n_z, n_hidden_gener_1)),
-            'h2': tf.Variable(_xavier_init(n_hidden_gener_1, n_hidden_gener_2)),
-            'out_mean': tf.Variable(_xavier_init(n_hidden_gener_2, n_input)),
-            'out_log_sigma': tf.Variable(_xavier_init(n_hidden_gener_2, n_input))}
-
-        all_weights['biases_gener'] = {
-            'b1': tf.Variable(tf.zeros([n_hidden_gener_1], dtype=tf.float32)),
-            'b2': tf.Variable(tf.zeros([n_hidden_gener_2], dtype=tf.float32)),
-            'out_mean': tf.Variable(tf.zeros([n_input], dtype=tf.float32)),
-            'out_log_sigma': tf.Variable(tf.zeros([n_input], dtype=tf.float32))}
-
-        return all_weights
-
-    def _encoder_network(self, weights, biases):
-        # Generate probabilistic encoder (recognition network), which
-        # maps inputs onto a normal distribution in latent space.
-        # The transformation is parametrized and can be learned.
-
-        layer_1 = self.transfer_fct(tf.add(tf.matmul(self.x, weights['h1']), biases['b1']))
-        layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights['h2']), biases['b2']))
-
-        z_mean = tf.add(tf.matmul(layer_2, weights['out_mean']), biases['out_mean'])
-        z_log_sigma_sq = tf.add(tf.matmul(layer_2, weights['out_log_sigma']), biases['out_log_sigma'])
-
-        return z_mean, z_log_sigma_sq
-
-    def _decoder_network(self, weights, biases):
-        # Generate probabilistic decoder (decoder network), which
-        # maps points in latent space onto a Bernoulli distribution in data space.
-        # The transformation is parametrized and can be learned.
-        layer_1 = self.transfer_fct(tf.add(tf.matmul(self.z, weights['h1']), biases['b1']))
-        layer_2 = self.transfer_fct(tf.add(tf.matmul(layer_1, weights['h2']), biases['b2']))
-
-        x_reconstr_mean = tf.nn.sigmoid(tf.add(tf.matmul(layer_2, weights['out_mean']), biases['out_mean']))
-
-        return x_reconstr_mean
-
-    def _create_loss_optimizer(self):
-        # The loss is composed of two terms:
-        # 1.) The reconstruction loss (the negative log probability
-        #     of the input under the reconstructed Bernoulli distribution
-        #     induced by the decoder in the data space).
-        #     This can be interpreted as the number of "nats" required
-        #     for reconstructing the input when the activation in latent
-        #     is given.
-        # Adding 1e-10 to avoid evaluatio of log(0.0)
-        reconstr_loss = -tf.reduce_sum(self.x * tf.log(1e-10 + self.x_reconstr_mean)
-                                       + (1 - self.x) * tf.log(1e-10 + 1 - self.x_reconstr_mean),
-                                       1)
-
-        # 2.) The latent loss, which is defined as the Kullback Leibler divergence
-        #     between the distribution in latent space induced by the encoder on
-        #     the data and some prior. This acts as a kind of regularizer.
-        #     This can be interpreted as the number of "nats" required
-        #     for transmitting the the latent space distribution given
-        #     the prior.
-        latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
-                                           - tf.square(self.z_mean)
-                                           - tf.exp(self.z_log_sigma_sq), 1)
-
-        self.cost = tf.reduce_mean(reconstr_loss + latent_loss)  # average over batch
-        # Use ADAM optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.cost)
-
-    def partial_fit(self, X):
-        """Train model based on mini-batch of input data.
-
-        Return cost of mini-batch.
-        """
-        opt, cost = self.sess.run((self.optimizer, self.cost),
-                                  feed_dict={self.x: X})
-        return cost
-
-    def transform(self, X):
-        """Transform data by mapping it into the latent space."""
-        # Note: This maps to mean of distribution, we could alternatively
-        # sample from Gaussian distribution
-        return self.sess.run(self.z_mean, feed_dict={self.x: X})
-
-    def generate(self, z_mu=None):
-        """ Generate data by sampling from latent space.
-
-        If z_mu is not None, data for this point in latent space is
-        generated. Otherwise, z_mu is drawn from prior in latent
-        space.
-        """
-        if z_mu is None:
-            z_mu = np.random.normal(size=self.network_architecture["n_z"])
-        # Note: This maps to mean of distribution, we could alternatively
-        # sample from Gaussian distribution
-        return self.sess.run(self.x_reconstr_mean,
-                             feed_dict={self.z: z_mu})
-
-    def reconstruct(self, X):
-        """ Use VAE to reconstruct given data. """
-        return self.sess.run(self.x_reconstr_mean,
-                             feed_dict={self.x: X})
