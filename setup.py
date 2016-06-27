@@ -6,20 +6,22 @@ try:
 except ImportError:
     from distutils.core import setup
 
-version = "1.0"
-
 setup(
     author="Johannes Otterbach",
     author_email="johannesotterbach@gmail.com",
-    name="AutoEncoder",
+    name="dstk",
     packages=['AutoEncoder',
-              'AutoEncoder'],
+              'GAM'],
     version='0.0.1',
-    description="Simple Autoencoder built with TensorFlow",
-    url='https://github.com/jotterbach/AutoEncoder',
+    description="Data Science Toolkit",
+    url='https://github.com/jotterbach/dstk',
     install_requires=[
         'numpy',
-        'tensorflow'
+        'tensorflow',
+        'sklearn'
+    ],
+    test_requires=[
+        'pytest'
     ],
     dependency_links=[
         "https://storage.googleapis.com/tensorflow/mac/tensorflow-0.8.0-py2-none-any.whl"
