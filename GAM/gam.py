@@ -198,7 +198,22 @@ class GAM(object):
 
         self.initialized = True
 
-    def train(self, data, labels, n_iter=10, leaning_rate=0.01, display_step=25):
+    def _random_sample(self, data, label, sample_fraction):
+
+        if sample_fraction < 1.0 :
+            idx = int(sample_fraction * data.shape[0])
+            indices = np.random.permutation(data.shape[0])
+            training_idx, test_idx = indices[:idx], indices[idx:]
+            x_train, x_test = data[training_idx, :], data[test_idx, :]
+            y_train, y_test = label[training_idx], label[test_idx]
+
+        else:
+            x_train, x_test = data, data
+            y_train, y_test = label, label
+
+        return x_train, x_test, y_train, y_test
+
+    def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction = 1.0):
         if not self.initialized:
             self._n_dim = data.shape[1]
             self._init_shapes(labels)
@@ -206,13 +221,15 @@ class GAM(object):
         for epoch in range(n_iter):
             self._recording['epoch'] += 1
 
-            responses = self._get_pseudo_responses(data, labels)
-            new_shapes = {dim: self._get_shape_for_attribute(data[:, dim], responses) for dim in range(data.shape[1])}
+            x_train, x_test, y_train, y_test = self._random_sample(data, labels, sample_fraction)
+
+            responses = self._get_pseudo_responses(x_train, y_train)
+            new_shapes = {dim: self._get_shape_for_attribute(x_train[:, dim], responses) for dim in range(data.shape[1])}
 
             for dim, shape in self.shapes.iteritems():
-                self.shapes[dim] = shape.add(new_shapes[dim].multiply(leaning_rate))
+                self.shapes[dim] = shape.add(new_shapes[dim].multiply(learning_rate))
 
-            acc, prec, rec, auc = self._train_cost(data, labels)
+            acc, prec, rec, auc = self._train_cost(x_test, y_test)
             if (epoch + 1) % display_step == 0:
                 print "Epoch:", '{0:04d} / {1:04d}'.format(epoch + 1, n_iter)
                 print "accuracy: {}, precision: {}, recall: {}, roc_auc: {}\n".format(acc, prec, rec, auc)

@@ -9,7 +9,7 @@ labels = 2 * cancer_ds['target'] - 1
 
 def test_gam_training():
     gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42)
-    gam.train(data, labels, n_iter=5, display_step=5, leaning_rate=0.0025)
+    gam.train(data, labels, n_iter=5, display_step=5, learning_rate=0.0025)
 
     assert_scores = [
         (0.51027618321245982, 0.48972381678754023),
