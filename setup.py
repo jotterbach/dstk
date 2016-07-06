@@ -18,7 +18,8 @@ setup(
     install_requires=[
         'numpy',
         'tensorflow',
-        'sklearn'
+        'sklearn',
+        'pandas'
     ],
     test_requires=[
         'pytest'

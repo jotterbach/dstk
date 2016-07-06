@@ -6,6 +6,11 @@ import numpy as np
 import bisect
 from collections import Counter
 import pandas
+from datetime import datetime
+import json as js
+import tarfile as tf
+import os
+import re
 
 
 class ShapeFunction(object):
@@ -62,6 +67,41 @@ class ShapeFunction(object):
     def equals(self, other):
         return (self.splits == other.splits).all() and (self.values == other.values).all()
 
+    def serialize(self, file_path, meta_data=dict()):
+        meta_data_dct = {
+            'serialization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S%z')
+        }
+        meta_data_dct.update(meta_data)
+
+        dct = {
+            'feature_name': self.name,
+            'splits': self.splits.tolist(),
+            'values': self.values.tolist(),
+            'split_rule': 'LT',
+            'meta_data': meta_data_dct
+        }
+
+        if not os.path.exists(file_path):
+            os.makedirs(file_path)
+
+        with open('{}/{}.json'.format(file_path, ShapeFunction.create_clean_file_name(self.name)), 'w') as fp:
+            js.dump(dct, fp, sort_keys=True, indent=2, separators=(',', ': '))
+
+
+    @staticmethod
+    def create_clean_file_name(file_name):
+        cleaning_pattern = re.compile(r'[\\#\.\$@!><\|/]+')
+        return re.sub(cleaning_pattern, "__", file_name)
+
+    @staticmethod
+    def load_from_json(file_path):
+        with open(file_path, 'r') as fp:
+            dct = js.load(fp=fp)
+
+        return ShapeFunction(np.asarray(dct['splits']),
+                             np.asarray(dct['values']),
+                             dct['feature_name'])
+
 
 class GAM(object):
 
@@ -82,27 +122,27 @@ class GAM(object):
             'learning_rate_schedule': dict()
         }
 
-        criterion = kwargs.get('criterion', 'mse')
-        splitter = kwargs.get('splitter', 'best')
-        max_depth = kwargs.get('max_depth', None)
-        min_samples_split = kwargs.get('min_samples_split', 2)
-        min_samples_leaf = kwargs.get('min_samples_leaf', 1)
-        min_weight_fraction_leaf = kwargs.get('min_weight_fraction_leaf', 0.0)
-        max_features = kwargs.get('max_features', None)
-        random_state = kwargs.get('random_state', None)
-        max_leaf_nodes = kwargs.get('max_leaf_nodes', None)
-        presort = kwargs.get('presort', False)
+        self.criterion = kwargs.get('criterion', 'mse')
+        self.splitter = kwargs.get('splitter', 'best')
+        self.max_depth = kwargs.get('max_depth', None)
+        self.min_samples_split = kwargs.get('min_samples_split', 2)
+        self.min_samples_leaf = kwargs.get('min_samples_leaf', 1)
+        self.min_weight_fraction_leaf = kwargs.get('min_weight_fraction_leaf', 0.0)
+        self.max_features = kwargs.get('max_features', None)
+        self.random_state = kwargs.get('random_state', None)
+        self.max_leaf_nodes = kwargs.get('max_leaf_nodes', None)
+        self.presort = kwargs.get('presort', False)
 
-        self.dtr = DecisionTreeRegressor(criterion=criterion,
-                                         splitter=splitter,
-                                         max_depth=max_depth,
-                                         min_samples_split=min_samples_split,
-                                         min_samples_leaf=min_samples_leaf,
-                                         min_weight_fraction_leaf=min_weight_fraction_leaf,
-                                         max_features=max_features,
-                                         random_state=random_state,
-                                         max_leaf_nodes=max_leaf_nodes,
-                                         presort=presort)
+        self.dtr = DecisionTreeRegressor(criterion=self.criterion,
+                                         splitter=self.splitter,
+                                         max_depth=self.max_depth,
+                                         min_samples_split=self.min_samples_split,
+                                         min_samples_leaf=self.min_samples_leaf,
+                                         min_weight_fraction_leaf=self.min_weight_fraction_leaf,
+                                         max_features=self.max_features,
+                                         random_state=self.random_state,
+                                         max_leaf_nodes=self.max_leaf_nodes,
+                                         presort=self.presort)
 
     @staticmethod
     def _recurse(tree, feature_vec):
@@ -278,3 +318,78 @@ class GAM(object):
                 print "accuracy: {}, precision: {}, recall: {}, roc_auc: {}\n".format(acc, prec, rec, auc)
 
         self.is_fit = True
+
+    def serialize(self, model_name, file_path=None):
+
+        if file_path is None:
+            file_path = os.getcwd()
+
+        folder_path = '{}/{}'.format(file_path, model_name)
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+
+        for shape in self.shapes.itervalues():
+            shape.serialize('{}/{}/shapes'.format(file_path, model_name), meta_data={'model_name': model_name})
+
+        meta_data_dct = {
+            'training_meta_data': self._recording,
+            'DecisionTreeRegressor_meta_data': {
+                'criterion': self.criterion,
+                'splitter': self.splitter,
+                'max_depth': self.max_depth,
+                'min_samples_split': self.min_samples_split,
+                'min_samples_leaf': self.min_samples_leaf,
+                'min_weight_fraction_leaf': self.min_weight_fraction_leaf,
+                'max_features': self.max_features,
+                'random_state': self.random_state,
+                'max_leaf_nodes': self.max_leaf_nodes,
+                'presort': self.presort,
+                'type': str(self.dtr.__class__)
+            },
+            'serialization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S%z')
+        }
+
+        dct = {
+            'model_name': model_name,
+            'num_features': self._n_features,
+            'feature_names': self.feature_names,
+            'meta_data': meta_data_dct,
+            'shape_data': './shapes'
+            }
+
+        with open('{}/{}/{}.json'.format(file_path, model_name, model_name), 'w') as fp:
+            js.dump(dct, fp, sort_keys=True, indent=2, separators=(',', ': '))
+
+        GAM._make_tarfile('{}/{}.tar.gz'.format(file_path, model_name), '{}/{}'.format(file_path, model_name))
+
+    @staticmethod
+    def _make_tarfile(output_filename, source_dir):
+        with tf.open(output_filename, "w:gz") as tar:
+            tar.add(source_dir, arcname=os.path.basename(source_dir))
+
+    @staticmethod
+    def load_from_tar(file_name):
+
+        model_name = file_name.split('/')[-1].replace('.tar.gz', '')
+
+        gam = GAM()
+
+        with tf.open(file_name, "r:gz") as tar:
+            f = tar.extractfile('{}/{}.json'.format(model_name, model_name))
+            content = js.loads(f.read())
+            gam._recording = content['meta_data']['training_meta_data']
+            gam._n_features = content['num_features']
+            gam.feature_names = content['feature_names']
+
+            for member in tar.getmembers():
+                if member.isfile() and (member.name != '{}/{}.json'.format(model_name, model_name)):
+                    f = tar.extractfile(member.path)
+                    content = js.loads(f.read())
+                    gam.shapes.update({content['feature_name']: ShapeFunction(content['splits'],
+                                                                              content['values'],
+                                                                              content['feature_name'])})
+
+        assert set(gam.shapes.keys()) == set(gam.feature_names), 'feature names and shape names do not match up'
+        return gam
+
+
