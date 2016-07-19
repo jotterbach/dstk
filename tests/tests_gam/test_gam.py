@@ -52,13 +52,13 @@ def test_func_add():
     assert func1.add(func2).equals(func3)
 
 
-@pytest.mark.xfail(raises=AssertionError)
 def test_func_add_fails_with_different_features():
     func1 = ShapeFunction(np.linspace(1, 3, 3), np.linspace(1, 3, 3), 'test_1')
     func2 = ShapeFunction(np.linspace(1.5, 10.5, 5), -1 * np.linspace(1, 10, 5), 'test_2')
 
     assert func1 != func2
-    assert func1.add(func2)
+    with pytest.raises(AssertionError):
+        func1.add(func2)
 
 
 def test_func_add_with_equal_splits():
