@@ -21,10 +21,11 @@ setup(
         'sklearn',
         'pandas'
     ],
-    test_requires=[
+    tests_require=[
         'pytest'
     ],
     dependency_links=[
         "https://storage.googleapis.com/tensorflow/mac/tensorflow-0.8.0-py2-none-any.whl"
-    ]
+    ],
+    test_suite='tests'
 )
