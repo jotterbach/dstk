@@ -278,7 +278,7 @@ class GAM(object):
         assert self._n_features is not None, "Number of attributes is None"
 
         self.shapes = {name: ShapeFunction([np.PINF],
-                                           [np.log(cntr.get(1, 0)) / cntr.get(-1, 1) / (2 * self._n_features)],
+                                           [np.log(cntr.get(1, 0) / cntr.get(-1, 1)) / (2 * self._n_features)],
                                            name)
                        for name in self.feature_names}
         self.initialized = True
