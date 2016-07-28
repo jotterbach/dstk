@@ -14,11 +14,11 @@ def test_gam_training():
     gam.train(data, labels, n_iter=5, display_step=5, learning_rate=0.0025)
 
     assert_scores = [
-        (0.44867985426300444, 0.5513201457369956),
-        (0.499827667180624, 0.500172332819376),
-        (0.4551212829623099, 0.5448787170376902),
-        (0.49495346576358346, 0.5050465342364165),
-        (0.46610563669559585, 0.5338943633044041)
+        (0.5513201457369956, 0.44867985426300444),
+        (0.500172332819376, 0.499827667180624),
+        (0.5448787170376902, 0.4551212829623099),
+        (0.5050465342364165, 0.49495346576358346),
+        (0.5338943633044041, 0.46610563669559585)
     ]
 
     for idx, vec in enumerate(data[:5, :]):
@@ -83,6 +83,23 @@ def test_correct_scoring():
         # the shape function cancel each other in their effect
         # hence the exponent is zero and the probability 0.5
         assert gam.score(vec) == (0.5, 0.5)
+
+
+def test_correct_scoring_2():
+    func1 = ShapeFunction(_create_partition(np.linspace(1, 10, 10)), 0.75 * np.ones(11), 'attr_1')
+    func2 = ShapeFunction(_create_partition(np.linspace(1, 10, 10)),  -0.25 * np.ones(11), 'attr_2')
+
+    gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42)
+    gam.shapes = {'attr_1': func1,
+                  'attr_2': func2}
+    gam.feature_names = ['attr_1', 'attr_2']
+    data = np.asarray([[1, 1], [-1, -1]])
+
+    for vec in data:
+        # the shape function cancel each other in their effect
+        # hence the exponent is zero and the probability 0.5
+        assert gam.logit_score(vec) == 0.5
+        assert gam.score(vec) == (0.2689414213699951, 0.7310585786300049)
 
 
 def test_pseudo_response():

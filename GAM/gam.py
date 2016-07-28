@@ -45,7 +45,6 @@ class ShapeFunction(object):
         idx = bisect.bisect(self.splits, feature_value)
         if idx == len(self.splits):
             idx = -1
-        val = self.values[idx]
         return self.values[idx]
 
     def multiply(self, const):
@@ -242,8 +241,8 @@ class GAM(object):
         return np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])
 
     def score(self, vec):
-        return sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])),\
-               sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))
+        return sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])),\
+               sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))
 
     def _train_cost(self, data, labels):
         pred_scores = np.asarray([self.score(vec) for vec in data], dtype='float')
@@ -324,7 +323,43 @@ class GAM(object):
 
         assert len(data) == len(labels), "Data and Targets have different lentgth."
 
-    def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction=1.0):
+    @staticmethod
+    def _get_minority_majority_keys(sample_size_dict):
+        return min(sample_size_dict, key=sample_size_dict.get), max(sample_size_dict, key=sample_size_dict.get)
+
+    @staticmethod
+    def _upsample_minority_class(data, labels):
+        cntr = Counter(labels)
+        minority_key, majority_key = GAM._get_minority_majority_keys(cntr)
+
+        minority_idx = np.where(labels == minority_key)[0]
+        upsample_index = np.random.choice(minority_idx, size=cntr.get(majority_key) - cntr.get(minority_key))
+        majority_idx = np.where(labels == majority_key)[0]
+
+        upsampled_data = data[list(minority_idx) + list(upsample_index) + list(majority_idx), :]
+        upsampled_labels = labels[list(minority_idx) + list(upsample_index) + list(majority_idx)]
+
+        randomized_idx = np.random.permutation(len(upsampled_labels))
+
+        return upsampled_data[randomized_idx, :], upsampled_labels[randomized_idx]
+
+    @staticmethod
+    def _downsample_majority_class(data, labels):
+        cntr = Counter(labels)
+        minority_key, majority_key = GAM._get_minority_majority_keys(cntr)
+
+        minority_idx = np.where(labels == minority_key)[0]
+        majority_idx = np.where(labels == majority_key)[0]
+        downsample_index = np.random.choice(majority_idx, size=cntr.get(minority_key))
+
+        downsample_data = data[list(minority_idx) + list(downsample_index), :]
+        downsample_labels = labels[list(minority_idx) + list(downsample_index)]
+
+        randomized_idx = np.random.permutation(len(downsample_labels))
+
+        return downsample_data[randomized_idx, :], labels[randomized_idx]
+
+    def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction=1.0, balanced=None):
         if not self.initialized:
             data, labels = self._init_shapes_and_data(data, labels)
         else:
@@ -335,6 +370,11 @@ class GAM(object):
 
         self._check_input(data, labels)
 
+        if balanced == 'global_upsample':
+            data, labels = self._upsample_minority_class(data, labels)
+        elif balanced == 'global_downsample':
+            data, labels = self._downsample_majority_class(data, labels)
+
         for epoch in range(n_iter):
             self._recording['epoch'] += 1
 
@@ -344,6 +384,11 @@ class GAM(object):
                 lr = learning_rate
 
             x_train, x_test, y_train, y_test = self._random_sample(data, labels, sample_fraction)
+
+            if balanced == 'boosted_upsample':
+                x_train, y_train = self._upsample_minority_class(x_train, y_train)
+            elif balanced == 'boosted_downsample':
+                x_train, y_train = self._downsample_majority_class(x_train, y_train)
 
             responses = self._get_pseudo_responses(x_train, y_train)
             new_shapes = {name: self._get_shape_for_attribute(x_train[:, self._get_index_for_feature(name)], responses, name) for name in self.feature_names}
