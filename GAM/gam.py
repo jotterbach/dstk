@@ -5,6 +5,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_a
 import numpy as np
 import bisect
 from collections import Counter
+from operator import itemgetter
 import pandas
 from datetime import datetime
 import json as js
@@ -129,6 +130,7 @@ class GAM(object):
         self._n_features = None
         self.initialized = False
         self.feature_names = None
+        self.class_weights = np.ones(2)
         self._recording = {
             'epoch': 0,
             'costs': {
@@ -150,6 +152,14 @@ class GAM(object):
         self.random_state = kwargs.get('random_state', None)
         self.max_leaf_nodes = kwargs.get('max_leaf_nodes', None)
         self.presort = kwargs.get('presort', False)
+
+        self.balancer = kwargs.get('balanced', None)
+
+        _allowed_balancers = ['global_upsample', 'global_downsample', 'boosted_upsample', 'boosted_downsample', 'class_weights']
+
+        if not self.balancer is None:
+            if not self.balancer in _allowed_balancers:
+                raise NotImplementedError("Balancing method '{}' not implemented. Choose one of {}.".format(self.balancer, _allowed_balancers))
 
         self.dtr = DecisionTreeRegressor(criterion=self.criterion,
                                          splitter=self.splitter,
@@ -181,7 +191,7 @@ class GAM(object):
             feature_idx = tree.feature[node_id]
             threshold = tree.threshold[node_id]
 
-            if feature_vec[feature_idx] <= threshold:
+            if np.float32(feature_vec[feature_idx]) <= threshold:
                 upper = threshold
                 if (tree.children_left[node_id] != TREE_LEAF) and (tree.children_left[node_id] != TREE_UNDEFINED):
                     leaf_node_id = tree.children_left[node_id]
@@ -199,24 +209,24 @@ class GAM(object):
         return leaf_node_id, lower, upper
 
     @staticmethod
-    def _get_sum_of_gamma_correction(tree, data, labels, feature_name):
+    def _get_sum_of_gamma_correction(tree, data, labels, class_weights, feature_name):
 
         num_of_samples = {}
         sum_of_labels = {}
         weighted_sum_of_labels = {}
         set_of_boundaries = set()
 
-        for vec, label in zip(data, labels):
+        for vec, label, weight in zip(data, labels, class_weights):
             node_id, lower, upper = GAM._recurse(tree, vec)
 
             if node_id in sum_of_labels.keys():
                 num_of_samples[node_id] += 1
-                sum_of_labels[node_id] += label
-                weighted_sum_of_labels[node_id] += np.abs(label) * (2-np.abs(label))
+                sum_of_labels[node_id] += weight * label
+                weighted_sum_of_labels[node_id] += weight * np.abs(label) * (2-np.abs(label))
             else:
                 num_of_samples[node_id] = 1
-                sum_of_labels[node_id] = label
-                weighted_sum_of_labels[node_id] = np.abs(label) * (2-np.abs(label))
+                sum_of_labels[node_id] = weight * label
+                weighted_sum_of_labels[node_id] = weight * np.abs(label) * (2-np.abs( label))
 
             set_of_boundaries.add((node_id, lower, upper))
 
@@ -230,9 +240,9 @@ class GAM(object):
 
         return ShapeFunction(split_values, values, feature_name)
 
-    def _get_shape_for_attribute(self, attribute_data, labels, feature_name):
+    def _get_shape_for_attribute(self, attribute_data, labels, class_weights, feature_name):
         self.dtr.fit(attribute_data.reshape(-1, 1), labels)
-        return GAM._get_sum_of_gamma_correction(self.dtr.tree_, attribute_data, labels, feature_name)
+        return GAM._get_sum_of_gamma_correction(self.dtr.tree_, attribute_data, labels, class_weights, feature_name)
 
     def _get_index_for_feature(self, feature_name):
         return self.feature_names.index(feature_name)
@@ -359,7 +369,15 @@ class GAM(object):
 
         return downsample_data[randomized_idx, :], labels[randomized_idx]
 
-    def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction=1.0, balanced=None):
+    def _initialize_class_weights(self, labels):
+        cntr = Counter(labels)
+        bin_count = np.asarray([x[1] for x in sorted(cntr.items(), key=itemgetter(0))])
+        self.class_weights = bin_count.sum() / (2.0 * bin_count)
+
+    def _get_class_weights(self,labels):
+        return self.class_weights[np.asarray((labels + 1)/2, dtype=int)]
+
+    def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction=1.0):
         if not self.initialized:
             data, labels = self._init_shapes_and_data(data, labels)
         else:
@@ -370,10 +388,12 @@ class GAM(object):
 
         self._check_input(data, labels)
 
-        if balanced == 'global_upsample':
+        if self.balancer == 'global_upsample':
             data, labels = self._upsample_minority_class(data, labels)
-        elif balanced == 'global_downsample':
+        elif self.balancer == 'global_downsample':
             data, labels = self._downsample_majority_class(data, labels)
+        elif self.balancer == 'class_weights':
+            self._initialize_class_weights(labels)
 
         for epoch in range(n_iter):
             self._recording['epoch'] += 1
@@ -385,13 +405,15 @@ class GAM(object):
 
             x_train, x_test, y_train, y_test = self._random_sample(data, labels, sample_fraction)
 
-            if balanced == 'boosted_upsample':
+            if self.balancer == 'boosted_upsample':
                 x_train, y_train = self._upsample_minority_class(x_train, y_train)
-            elif balanced == 'boosted_downsample':
+            elif self.balancer == 'boosted_downsample':
                 x_train, y_train = self._downsample_majority_class(x_train, y_train)
 
+            class_weights = self._get_class_weights(y_train)
+
             responses = self._get_pseudo_responses(x_train, y_train)
-            new_shapes = {name: self._get_shape_for_attribute(x_train[:, self._get_index_for_feature(name)], responses, name) for name in self.feature_names}
+            new_shapes = {name: self._get_shape_for_attribute(x_train[:, self._get_index_for_feature(name)], responses, class_weights, name) for name in self.feature_names}
 
             for dim, shape in self.shapes.iteritems():
                 self.shapes[dim] = shape.add(new_shapes[dim].multiply(lr))
@@ -416,7 +438,8 @@ class GAM(object):
             shape.serialize('{}/{}/shapes'.format(file_path, model_name), meta_data={'model_name': model_name})
 
         meta_data_dct = {
-            'training_meta_data': self._recording,
+            'training_metadata': self._recording,
+            'balancer': self.balancer,
             'DecisionTreeRegressor_meta_data': {
                 'criterion': self.criterion,
                 'splitter': self.splitter,
@@ -437,7 +460,7 @@ class GAM(object):
             'model_name': model_name,
             'num_features': self._n_features,
             'feature_names': self.feature_names,
-            'meta_data': meta_data_dct,
+            'metadata': meta_data_dct,
             'shape_data': './shapes'
             }
 
@@ -461,7 +484,7 @@ class GAM(object):
         with tf.open(file_name, "r:gz") as tar:
             f = tar.extractfile('{}/{}.json'.format(model_name, model_name))
             content = js.loads(f.read())
-            gam._recording = content['meta_data']['training_meta_data']
+            gam._recording = content['metadata']['training_metadata']
             gam._n_features = content['num_features']
             gam.feature_names = content['feature_names']
 
