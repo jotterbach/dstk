@@ -11,6 +11,24 @@ import json as js
 import tarfile as tf
 import os
 import re
+import math
+
+
+def sigmoid(x):
+    """
+    Numerically-stable sigmoid function.
+    Taken from:
+      - http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
+      - http://stackoverflow.com/questions/3985619/how-to-calculate-a-logistic-sigmoid-function-in-python
+    """
+    if x >= 0:
+        z = math.exp(-x)
+        return 1 / (1 + z)
+    else:
+        # if x is less than zero then z will be small, denom can't be
+        # zero because it's 1+z.
+        z = math.exp(x)
+        return z / (1 + z)
 
 
 class ShapeFunction(object):
@@ -27,6 +45,7 @@ class ShapeFunction(object):
         idx = bisect.bisect(self.splits, feature_value)
         if idx == len(self.splits):
             idx = -1
+        val = self.values[idx]
         return self.values[idx]
 
     def multiply(self, const):
@@ -206,6 +225,10 @@ class GAM(object):
         split_values = [tup[2] for tup in lst_of_sorted_boundaries]
         node_keys = [tup[0] for tup in lst_of_sorted_boundaries]
         values = [(sum_of_labels[key]) / float(weighted_sum_of_labels[key]) for key in node_keys]
+
+        if not np.isfinite(values).any():
+            raise ArithmeticError("Encountered NaN or Infinity. Aborting training")
+
         return ShapeFunction(split_values, values, feature_name)
 
     def _get_shape_for_attribute(self, attribute_data, labels, feature_name):
@@ -219,8 +242,8 @@ class GAM(object):
         return np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])
 
     def score(self, vec):
-        return 1. / (1 + np.exp( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))),\
-               1. / (1 + np.exp(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])))
+        return sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])),\
+               sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))
 
     def _train_cost(self, data, labels):
         pred_scores = np.asarray([self.score(vec) for vec in data], dtype='float')
@@ -235,7 +258,7 @@ class GAM(object):
                roc_auc_score(labels, pred_scores[:, 1])
 
     def _get_pseudo_responses(self, data, labels):
-        return [2 * label / float(1 + np.exp(2 * label * self.logit_score(vec))) for vec, label in zip(data, labels)]
+        return [2 * label * sigmoid(-2 * label * self.logit_score(vec)) for vec, label in zip(data, labels)]
 
     def _init_shapes_and_data(self, data, labels):
 
@@ -256,7 +279,7 @@ class GAM(object):
         assert self._n_features is not None, "Number of attributes is None"
 
         self.shapes = {name: ShapeFunction([np.PINF],
-                                           [0.5 * np.log(cntr.get(1, 0)) / cntr.get(-1, 1)],
+                                           [np.log(cntr.get(1, 0)) / cntr.get(-1, 1) / (2 * self._n_features)],
                                            name)
                        for name in self.feature_names}
         self.initialized = True
@@ -292,9 +315,25 @@ class GAM(object):
 
         return self._current_lr
 
+    @staticmethod
+    def _check_input(data, labels):
+        if not np.isfinite(data).ravel().any():
+            raise ValueError("Encountered invalid value in the training data")
+        if not np.isfinite(labels).any():
+            raise ValueError("Encountered invalid value in the target data")
+
+        assert len(data) == len(labels), "Data and Targets have different lentgth."
+
     def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction=1.0):
         if not self.initialized:
             data, labels = self._init_shapes_and_data(data, labels)
+        else:
+            if isinstance(data, pandas.core.frame.DataFrame):
+                data = data.as_matrix()
+            if isinstance(labels, pandas.core.series.Series):
+                labels = labels.values
+
+        self._check_input(data, labels)
 
         for epoch in range(n_iter):
             self._recording['epoch'] += 1
@@ -391,5 +430,3 @@ class GAM(object):
 
         assert set(gam.shapes.keys()) == set(gam.feature_names), 'feature names and shape names do not match up'
         return gam
-
-
