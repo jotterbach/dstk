@@ -60,7 +60,7 @@ def fuzzy_ratio(str_0, str_1, override_list=None, override_return=np.NaN):
     :param override_return:
     :return:
     """
-    if override_list and ((str(str_0).lower() in override_list) or (str(str_1).lower() in override_list])):
+    if override_list and ((str(str_0).lower() in override_list) or (str(str_1).lower() in override_list)):
         return override_return
     return fuzz.ratio(str(str_0), str(str_1)) / 100
 
