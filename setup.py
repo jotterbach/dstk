@@ -19,7 +19,8 @@ setup(
         'numpy',
         'tensorflow',
         'sklearn',
-        'pandas'
+        'pandas',
+        'fuzzywuzzy'
     ],
     tests_require=[
         'pytest'
