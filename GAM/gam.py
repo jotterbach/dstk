@@ -365,9 +365,7 @@ class GAM(object):
         downsample_data = data[list(minority_idx) + list(downsample_index), :]
         downsample_labels = labels[list(minority_idx) + list(downsample_index)]
 
-        randomized_idx = np.random.permutation(len(downsample_labels))
-
-        return downsample_data[randomized_idx, :], labels[randomized_idx]
+        return downsample_data, downsample_labels
 
     def _initialize_class_weights(self, labels):
         cntr = Counter(labels)

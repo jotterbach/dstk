@@ -1,5 +1,6 @@
 import pytest
 from sklearn import datasets as ds
+from collections import Counter
 
 from GAM.gam import GAM, ShapeFunction
 import numpy as np
@@ -7,6 +8,34 @@ import numpy as np
 cancer_ds = ds.load_breast_cancer()
 data = cancer_ds['data'][:, :20]
 labels = 2 * cancer_ds['target'] - 1
+
+
+def test_downsample():
+    initial_cntr = Counter(labels)
+    min_size = np.min(initial_cntr.values())
+    down_data, down_labels = GAM._downsample_majority_class(data, labels)
+
+    for down_idx, vec in enumerate(down_data):
+        idx = np.where((data == vec).all(axis=1))[0].squeeze()
+        assert labels[idx] == down_labels[down_idx]
+
+    cntr = Counter(down_labels)
+    assert cntr.get(1) == min_size
+    assert cntr.get(1) == cntr.get(-1)
+
+
+def test_upsample():
+    initial_cntr = Counter(labels)
+    max_size = np.max(initial_cntr.values())
+    up_data, up_labels = GAM._upsample_minority_class(data, labels)
+
+    for down_idx, vec in enumerate(up_data):
+        idx = np.where((data == vec).all(axis=1))[0].squeeze()
+        assert labels[idx] == up_labels[down_idx]
+
+    cntr = Counter(up_labels)
+    assert cntr.get(1) == max_size
+    assert cntr.get(1) == cntr.get(-1)
 
 
 def test_gam_training():
@@ -48,6 +77,18 @@ def test_func_add():
 
     func3 = ShapeFunction([1.0, 1.5, 2.0, 3.0, 3.75, 6.0, 8.25, 10.5],
                           [1.0, -1.0, 2.0, 3.0, -3.25, -5.5, -7.75, -10.0], 'test_1')
+
+    assert func1.add(func2).equals(func3)
+
+
+def test_func_add_2():
+    func1 = ShapeFunction([np.PINF], [0], 'test_1')
+    func2 = ShapeFunction([0, 1, 2], [-1, 1, -2], 'test_1')
+
+    assert func1 != func2
+
+    func3 = ShapeFunction([0.0, 1.0, 2.0, np.PINF],
+                          [-1.0, 1.0, -2.0, 0.0], 'test_1')
 
     assert func1.add(func2).equals(func3)
 
