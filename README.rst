@@ -117,3 +117,31 @@ Content
     .. code:: python
 
         gam._recording
+
+
+- Bolasso:
+    The Bolasso package provides and implementation of the Bolasso feature selection technique, based on the article `Model consistent Lasso estimation through the bootstrap`_
+    by F. R. Bach.
+
+    This feature selection wrapper trains several sklearn LogisticRegressionCV classifiers with L1-penalty on a bootstrapped subset of the data.
+    It keeps a running tap on the number of occurences a given feature appeared throughout all iterations.
+
+    To instantiate the selector we run
+
+    .. code:: python
+
+        b = bl.Bolasso(bootstrap_fraction=0.5, num_bootstraps=5)
+
+    We can then fit the selector using
+
+    .. code:: python
+
+        b.fit(data_df, target_series)
+
+    To get the individual feature statistics we call
+
+    .. code:: python
+
+        b.get_feature_stats()
+
+    .. _Model consistent Lasso estimation through the bootstrap: http://dl.acm.org/citation.cfm?id=1390161
