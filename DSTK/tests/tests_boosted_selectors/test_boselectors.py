@@ -1,6 +1,6 @@
 import pandas as pd
 import sklearn.datasets as ds
-import BoostedFeatureSelectors.boselector as bs
+import DSTK.BoostedFeatureSelectors.boselector as bs
 import numpy as np
 
 cancer_ds = ds.load_breast_cancer()
@@ -24,6 +24,7 @@ def test_botree():
     assert b.get_feature_stats().columns.tolist() == ['coef_mean', 'coef_std', 'frac_occurence', 'num_occurence']
     assert b.coeff_df.shape == (5, 30)
     assert b.coeff_df.isnull().any().sum() == False
+
 
 def test_boforest():
     b = bs.Boforest(bootstrap_fraction=0.5, random_state=42, random_seed=13)

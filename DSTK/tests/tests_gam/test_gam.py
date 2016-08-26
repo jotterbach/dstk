@@ -2,7 +2,7 @@ import pytest
 from sklearn import datasets as ds
 from collections import Counter
 
-from GAM.gam import GAM, ShapeFunction
+from DSTK.GAM.gam import GAM, ShapeFunction
 import numpy as np
 
 cancer_ds = ds.load_breast_cancer()

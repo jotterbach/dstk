@@ -1,4 +1,4 @@
-import Distinctor.distinctor as dst
+import DSTK.Distinctor.distinctor as dst
 import pandas as pd
 from datetime import date
 

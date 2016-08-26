@@ -10,10 +10,7 @@ setup(
     author="Johannes Otterbach",
     author_email="johannesotterbach@gmail.com",
     name="dstk",
-    packages=['AutoEncoder',
-              'GAM',
-              'Distinctor',
-              'BoostedFeatureSelectors'],
+    packages=['DSTK'],
     version='0.0.1',
     description="Data Science Toolkit",
     url='https://github.com/jotterbach/dstk',
@@ -27,8 +24,8 @@ setup(
     tests_require=[
         'pytest'
     ],
+    test_suite='DSTK.tests',
     dependency_links=[
         "https://storage.googleapis.com/tensorflow/mac/tensorflow-0.8.0-py2-none-any.whl"
-    ],
-    test_suite='tests'
+    ]
 )
