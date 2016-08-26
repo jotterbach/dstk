@@ -19,8 +19,6 @@ class Bolasso(object):
 
     Parameters
     ----------
-    num_boostraps: Number of bootstrapped classifiers that will be trained
-
     bootstrap_fraction: Fraction of the data that will be bootstrap sampled with replacement.
 
     random_seed: Fix the seed for the bootstrap generator
@@ -35,10 +33,10 @@ class Bolasso(object):
 
     """
 
-    def __init__(self, num_bootstraps, bootstrap_fraction, random_seed=None, **kwargs):
+    def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
         self.initialized = False
 
-        self.num_bootstraps = num_bootstraps
+        self.num_bootstraps = 0
         self.bootstrap_fraction = bootstrap_fraction
         self.random_seed = random_seed
 
@@ -99,12 +97,13 @@ class Bolasso(object):
 
         return data[rand_idx, :], labels[rand_idx]
 
-    def fit(self, data, labels):
+    def fit(self, data, labels, epochs=10):
         """
         Fits the Bolasso selector
 
         :param data: Pandas DataFrame containing all the data
         :param labels: Pandas Series with the labels
+        :param epochs: Number of fitting iterations. Defaults to 10.
         :return: None
         """
 
@@ -117,18 +116,21 @@ class Bolasso(object):
                 labels = labels.values
 
         start = time.time()
-        for m in range(self.num_bootstraps):
+        for m in range(epochs):
 
             boot_data, boot_labels = self._get_bootstrap_sample(data, labels)
             self.logit.fit(boot_data, boot_labels)
             self.bolasso_df = self.bolasso_df.append(pd.Series({attr: coef for attr, coef in zip(self.attributes, self.logit.coef_.flatten().tolist())}), ignore_index=True)
+            self.num_bootstraps += 1
 
-            sys.stdout.write("\r>> Iteration: {0:0d}/{1:0d}, elapsed time:{2:4.1f} s".format(m+1, self.num_bootstraps, time.time()-start))
+            sys.stdout.write("\r>> Iteration: {0:0d}/{1:0d}, elapsed time:{2:4.1f} s".format(m+1, epochs, time.time()-start))
             sys.stdout.flush()
+        sys.stdout.write('\n')
+        sys.stdout.flush()
 
     def _calculate_stats(self, row):
-        return pd.Series({'coef_mean': row.mean(),
-                          'coef_std': row.std(),
+        return pd.Series({'coef_mean': row[row != 0].mean(),
+                          'coef_std': row[row != 0].std(),
                           'num_occurence': (row != 0).sum(),
                           'frac_occurence': (row != 0).sum() / self.num_bootstraps})
 

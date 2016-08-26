@@ -130,14 +130,15 @@ Content
 
     .. code:: python
 
-        b = bl.Bolasso(bootstrap_fraction=0.5, num_bootstraps=5)
+        b = bl.Bolasso(bootstrap_fraction=0.5)
 
     We can then fit the selector using
 
     .. code:: python
 
-        b.fit(data_df, target_series)
+        b.fit(data_df, target_series, epochs=5)
 
+    If the results are not yet satisfactory, you can call this again and it continues to train the same Bolasso selector.
     To get the individual feature statistics we call
 
     .. code:: python
