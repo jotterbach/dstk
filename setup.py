@@ -11,7 +11,7 @@ except ImportError:
 setup(
     author="Johannes Otterbach",
     author_email="johannesotterbach@gmail.com",
-    name="dstk",
+    name="DSTK",
     packages=['DSTK'],
     version=DSTK.__version__,
     description="Data Science Toolkit",
