@@ -1,6 +1,8 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import DSTK
+
 try:
     from setuptools import setup
 except ImportError:
@@ -11,7 +13,7 @@ setup(
     author_email="johannesotterbach@gmail.com",
     name="dstk",
     packages=['DSTK'],
-    version='0.0.1',
+    version=DSTK.__version__,
     description="Data Science Toolkit",
     url='https://github.com/jotterbach/dstk',
     install_requires=[
