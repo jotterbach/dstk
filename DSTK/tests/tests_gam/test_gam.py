@@ -1,6 +1,5 @@
 import pytest
 from sklearn import datasets as ds
-from collections import Counter
 
 from DSTK.GAM.gam import GAM, ShapeFunction
 import numpy as np
@@ -10,48 +9,22 @@ data = cancer_ds['data'][:, :20]
 labels = 2 * cancer_ds['target'] - 1
 
 
-def test_downsample():
-    initial_cntr = Counter(labels)
-    min_size = np.min(initial_cntr.values())
-    down_data, down_labels = GAM._downsample_majority_class(data, labels)
-
-    for down_idx, vec in enumerate(down_data):
-        idx = np.where((data == vec).all(axis=1))[0].squeeze()
-        assert labels[idx] == down_labels[down_idx]
-
-    cntr = Counter(down_labels)
-    assert cntr.get(1) == min_size
-    assert cntr.get(1) == cntr.get(-1)
-
-
-def test_upsample():
-    initial_cntr = Counter(labels)
-    max_size = np.max(initial_cntr.values())
-    up_data, up_labels = GAM._upsample_minority_class(data, labels)
-
-    for down_idx, vec in enumerate(up_data):
-        idx = np.where((data == vec).all(axis=1))[0].squeeze()
-        assert labels[idx] == up_labels[down_idx]
-
-    cntr = Counter(up_labels)
-    assert cntr.get(1) == max_size
-    assert cntr.get(1) == cntr.get(-1)
-
-
 def test_gam_training():
-    gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42)
-    gam.train(data, labels, n_iter=5, display_step=5, learning_rate=0.0025)
+    gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42, balancer_seed=42)
+    gam.train(data, labels, n_iter=5, learning_rate=0.0025, num_bags=1, num_workers=3)
 
     assert_scores = [
-        (0.47935468041733226, 0.5206453195826677),
-        (0.48710541659624385, 0.5128945834037562),
-        (0.48732856271802855, 0.5126714372819714),
-        (0.4683372073154978, 0.5316627926845022),
-        (0.48593558483691957, 0.5140644151630804)
+        (0.4917664673905752, 0.5082335326094247),
+        (0.4823741133659004, 0.5176258866340996),
+        (0.5018635273839316, 0.49813647261606836),
+        (0.4821937055275455, 0.5178062944724545),
+        (0.4833455832683016, 0.5166544167316984)
     ]
 
     for idx, vec in enumerate(data[:5, :]):
-        assert gam.score(vec) == assert_scores[idx]
+        gam_scores = gam.score(vec)
+        np.testing.assert_almost_equal(np.sum(gam_scores), 1.0, 10)
+        np.testing.assert_almost_equal(gam_scores, assert_scores[idx], 10)
 
 
 def test_returning_value():
