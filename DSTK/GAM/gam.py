@@ -3,7 +3,6 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.tree._tree import TREE_LEAF, TREE_UNDEFINED, Tree
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 import numpy as np
-import bisect
 from collections import Counter
 from operator import itemgetter
 import pandas
@@ -13,6 +12,11 @@ import tarfile as tf
 import os
 import re
 import math
+import sys
+import time
+import DSTK.utils.sampling_helpers as sh
+import DSTK.utils.metrics as metrics
+from concurrent import futures
 
 
 def sigmoid(x):
@@ -38,12 +42,12 @@ class ShapeFunction(object):
         assert len(list_of_splits) == len(list_of_values), 'splits and values need to be of the same length'
         assert all(list_of_splits[i] <= list_of_splits[i+1] for i in xrange(len(list_of_splits)-1)), 'range of splits has to be sorted!'
 
-        self.splits = np.asarray(list_of_splits)
-        self.values = np.asarray(list_of_values)
+        self.splits = np.asarray(list_of_splits, dtype=np.float64)
+        self.values = np.asarray(list_of_values, dtype=np.float64)
         self.name = name
 
     def get_value(self, feature_value):
-        idx = bisect.bisect(self.splits, feature_value)
+        idx = np.searchsorted(self.splits, feature_value, side='right')
         if idx == len(self.splits):
             idx = -1
         return self.values[idx]
@@ -64,7 +68,7 @@ class ShapeFunction(object):
         new_vals = self.values
 
         for split, val in zip(other.splits, other.values):
-            idx = bisect.bisect(new_splits, split)
+            idx = np.searchsorted(new_splits, split, side='right')
             new_val = val
             if split in new_splits:
                 idx_2 = np.argwhere(new_splits == split)
@@ -122,6 +126,93 @@ class ShapeFunction(object):
                              dct['feature_name'])
 
 
+def _recurse(tree, feature_vec):
+
+    assert isinstance(tree, Tree), "Tree is not a sklearn Tree"
+
+    break_idx = 0
+    node_id = 0
+
+    if not isinstance(feature_vec, list):
+        feature_vec = list([feature_vec])
+
+    leaf_node_id = 0
+    lower = np.NINF
+    upper = np.PINF
+
+    while (node_id != TREE_LEAF) & (tree.feature[node_id] != TREE_UNDEFINED):
+        feature_idx = tree.feature[node_id]
+        threshold = tree.threshold[node_id]
+
+        if np.float32(feature_vec[feature_idx]) <= threshold:
+            upper = threshold
+            if (tree.children_left[node_id] != TREE_LEAF) and (tree.children_left[node_id] != TREE_UNDEFINED):
+                leaf_node_id = tree.children_left[node_id]
+            node_id = tree.children_left[node_id]
+        else:
+            lower = threshold
+            if (tree.children_right[node_id] == TREE_LEAF) and (tree.children_right[node_id] != TREE_UNDEFINED):
+                leaf_node_id = tree.children_right[node_id]
+            node_id = tree.children_right[node_id]
+
+        break_idx += 1
+        if break_idx > 2 * tree.node_count:
+            raise RuntimeError("infinite recursion!")
+
+    return leaf_node_id, lower, upper
+
+
+def _get_sum_of_gamma_correction(tree, data, labels, class_weights, feature_name):
+
+    num_of_samples = {}
+    sum_of_labels = {}
+    weighted_sum_of_labels = {}
+    set_of_boundaries = set()
+
+    for vec, label, weight in zip(data, labels, class_weights):
+        node_id, lower, upper = _recurse(tree, vec)
+
+        if node_id in sum_of_labels.keys():
+            num_of_samples[node_id] += 1
+            sum_of_labels[node_id] += weight * label
+            weighted_sum_of_labels[node_id] += weight * np.abs(label) * (2 - np.abs(label))
+        else:
+            num_of_samples[node_id] = 1
+            sum_of_labels[node_id] = weight * label
+            weighted_sum_of_labels[node_id] = weight * np.abs(label) * (2 - np.abs(label))
+
+        set_of_boundaries.add((node_id, lower, upper))
+
+    lst_of_sorted_boundaries = sorted(set_of_boundaries, key=lambda x: x[1])
+    split_values = [tup[2] for tup in lst_of_sorted_boundaries]
+    node_keys = [tup[0] for tup in lst_of_sorted_boundaries]
+    values = [(sum_of_labels[key]) / float(weighted_sum_of_labels[key]) for key in node_keys]
+
+    if not np.isfinite(values).any():
+        raise ArithmeticError("Encountered NaN or Infinity. Aborting training")
+
+    return ShapeFunction(split_values, values, feature_name)
+
+
+def _get_shape_for_attribute(attribute_data, labels, class_weights, feature_name, criterion, splitter,
+                             max_depth, min_samples_split, min_samples_leaf, min_weight_fraction_leaf,
+                             max_features, random_state, max_leaf_nodes, presort):
+
+    dtr = DecisionTreeRegressor(criterion=criterion,
+                                splitter=splitter,
+                                max_depth=max_depth,
+                                min_samples_split=min_samples_split,
+                                min_samples_leaf=min_samples_leaf,
+                                min_weight_fraction_leaf=min_weight_fraction_leaf,
+                                max_features=max_features,
+                                random_state=random_state,
+                                max_leaf_nodes=max_leaf_nodes,
+                                presort=presort)
+
+    dtr.fit(attribute_data.reshape(-1, 1), labels)
+    return feature_name, _get_sum_of_gamma_correction(dtr.tree_, attribute_data, labels, class_weights, feature_name)
+
+
 class GAM(object):
 
     def __init__(self, **kwargs):
@@ -136,6 +227,7 @@ class GAM(object):
             'costs': {
                 'accuracy': [],
                 'precision': [],
+                'prevalence': [],
                 'recall': [],
                 'roc_auc': []
             },
@@ -154,95 +246,13 @@ class GAM(object):
         self.presort = kwargs.get('presort', False)
 
         self.balancer = kwargs.get('balanced', None)
+        self.balancer_seed = kwargs.get('balancer_seed', None)
 
         _allowed_balancers = ['global_upsample', 'global_downsample', 'boosted_upsample', 'boosted_downsample', 'class_weights']
 
         if not self.balancer is None:
             if not self.balancer in _allowed_balancers:
                 raise NotImplementedError("Balancing method '{}' not implemented. Choose one of {}.".format(self.balancer, _allowed_balancers))
-
-        self.dtr = DecisionTreeRegressor(criterion=self.criterion,
-                                         splitter=self.splitter,
-                                         max_depth=self.max_depth,
-                                         min_samples_split=self.min_samples_split,
-                                         min_samples_leaf=self.min_samples_leaf,
-                                         min_weight_fraction_leaf=self.min_weight_fraction_leaf,
-                                         max_features=self.max_features,
-                                         random_state=self.random_state,
-                                         max_leaf_nodes=self.max_leaf_nodes,
-                                         presort=self.presort)
-
-    @staticmethod
-    def _recurse(tree, feature_vec):
-
-        assert isinstance(tree, Tree), "Tree is not a sklearn Tree"
-
-        break_idx = 0
-        node_id = 0
-
-        if not isinstance(feature_vec, list):
-            feature_vec = list([feature_vec])
-
-        leaf_node_id = 0
-        lower = np.NINF
-        upper = np.PINF
-
-        while (node_id != TREE_LEAF) & (tree.feature[node_id] != TREE_UNDEFINED):
-            feature_idx = tree.feature[node_id]
-            threshold = tree.threshold[node_id]
-
-            if np.float32(feature_vec[feature_idx]) <= threshold:
-                upper = threshold
-                if (tree.children_left[node_id] != TREE_LEAF) and (tree.children_left[node_id] != TREE_UNDEFINED):
-                    leaf_node_id = tree.children_left[node_id]
-                node_id = tree.children_left[node_id]
-            else:
-                lower = threshold
-                if (tree.children_right[node_id] == TREE_LEAF) and (tree.children_right[node_id] != TREE_UNDEFINED):
-                    leaf_node_id = tree.children_right[node_id]
-                node_id = tree.children_right[node_id]
-
-            break_idx += 1
-            if break_idx > 2 * tree.node_count:
-                raise RuntimeError("infinite recursion!")
-
-        return leaf_node_id, lower, upper
-
-    @staticmethod
-    def _get_sum_of_gamma_correction(tree, data, labels, class_weights, feature_name):
-
-        num_of_samples = {}
-        sum_of_labels = {}
-        weighted_sum_of_labels = {}
-        set_of_boundaries = set()
-
-        for vec, label, weight in zip(data, labels, class_weights):
-            node_id, lower, upper = GAM._recurse(tree, vec)
-
-            if node_id in sum_of_labels.keys():
-                num_of_samples[node_id] += 1
-                sum_of_labels[node_id] += weight * label
-                weighted_sum_of_labels[node_id] += weight * np.abs(label) * (2-np.abs(label))
-            else:
-                num_of_samples[node_id] = 1
-                sum_of_labels[node_id] = weight * label
-                weighted_sum_of_labels[node_id] = weight * np.abs(label) * (2-np.abs( label))
-
-            set_of_boundaries.add((node_id, lower, upper))
-
-        lst_of_sorted_boundaries = sorted(set_of_boundaries, key=lambda x: x[1])
-        split_values = [tup[2] for tup in lst_of_sorted_boundaries]
-        node_keys = [tup[0] for tup in lst_of_sorted_boundaries]
-        values = [(sum_of_labels[key]) / float(weighted_sum_of_labels[key]) for key in node_keys]
-
-        if not np.isfinite(values).any():
-            raise ArithmeticError("Encountered NaN or Infinity. Aborting training")
-
-        return ShapeFunction(split_values, values, feature_name)
-
-    def _get_shape_for_attribute(self, attribute_data, labels, class_weights, feature_name):
-        self.dtr.fit(attribute_data.reshape(-1, 1), labels)
-        return GAM._get_sum_of_gamma_correction(self.dtr.tree_, attribute_data, labels, class_weights, feature_name)
 
     def _get_index_for_feature(self, feature_name):
         return self.feature_names.index(feature_name)
@@ -257,13 +267,20 @@ class GAM(object):
     def _train_cost(self, data, labels):
         pred_scores = np.asarray([self.score(vec) for vec in data], dtype='float')
         pred_labels = [2 * np.argmax(score) - 1 for score in pred_scores]
-        self._recording['costs']['accuracy'].append(accuracy_score(labels, pred_labels))
-        self._recording['costs']['precision'].append(precision_score(labels, pred_labels))
-        self._recording['costs']['recall'].append(recall_score(labels, pred_labels))
+
+        prevalence, precision, recall, accuracy, f1, prior, support = metrics.get_all_metrics(labels,
+                                                                                              pred_labels,
+                                                                                              neg_class_label=-1)
+        self._recording['costs']['accuracy'].append(accuracy)
+        self._recording['costs']['precision'].append(precision)
+        self._recording['costs']['prevalence'].append(prevalence)
+        self._recording['costs']['recall'].append(recall)
         self._recording['costs']['roc_auc'].append(roc_auc_score(labels, pred_scores[:, 1]))
-        return accuracy_score(labels, pred_labels),\
-               precision_score(labels, pred_labels),\
-               recall_score(labels, pred_labels),\
+
+        return accuracy,\
+               precision,\
+               prevalence,\
+               recall,\
                roc_auc_score(labels, pred_scores[:, 1])
 
     def _get_pseudo_responses(self, data, labels):
@@ -295,22 +312,6 @@ class GAM(object):
 
         return data, labels
 
-    @staticmethod
-    def _random_sample(data, label, sample_fraction):
-
-        if sample_fraction < 1.0:
-            idx = int(sample_fraction * data.shape[0])
-            indices = np.random.permutation(data.shape[0])
-            training_idx, test_idx = indices[:idx], indices[idx:]
-            x_train, x_test = data[training_idx, :], data[test_idx, :]
-            y_train, y_test = label[training_idx], label[test_idx]
-
-        else:
-            x_train, x_test = data, data
-            y_train, y_test = label, label
-
-        return x_train, x_test, y_train, y_test
-
     def _update_learning_rate(self, dct, epoch):
 
         epoch_key = max(k for k in dct if k <= epoch)
@@ -333,40 +334,6 @@ class GAM(object):
 
         assert len(data) == len(labels), "Data and Targets have different lentgth."
 
-    @staticmethod
-    def _get_minority_majority_keys(sample_size_dict):
-        return min(sample_size_dict, key=sample_size_dict.get), max(sample_size_dict, key=sample_size_dict.get)
-
-    @staticmethod
-    def _upsample_minority_class(data, labels):
-        cntr = Counter(labels)
-        minority_key, majority_key = GAM._get_minority_majority_keys(cntr)
-
-        minority_idx = np.where(labels == minority_key)[0]
-        upsample_index = np.random.choice(minority_idx, size=cntr.get(majority_key) - cntr.get(minority_key))
-        majority_idx = np.where(labels == majority_key)[0]
-
-        upsampled_data = data[list(minority_idx) + list(upsample_index) + list(majority_idx), :]
-        upsampled_labels = labels[list(minority_idx) + list(upsample_index) + list(majority_idx)]
-
-        randomized_idx = np.random.permutation(len(upsampled_labels))
-
-        return upsampled_data[randomized_idx, :], upsampled_labels[randomized_idx]
-
-    @staticmethod
-    def _downsample_majority_class(data, labels):
-        cntr = Counter(labels)
-        minority_key, majority_key = GAM._get_minority_majority_keys(cntr)
-
-        minority_idx = np.where(labels == minority_key)[0]
-        majority_idx = np.where(labels == majority_key)[0]
-        downsample_index = np.random.choice(majority_idx, size=cntr.get(minority_key))
-
-        downsample_data = data[list(minority_idx) + list(downsample_index), :]
-        downsample_labels = labels[list(minority_idx) + list(downsample_index)]
-
-        return downsample_data, downsample_labels
-
     def _initialize_class_weights(self, labels):
         cntr = Counter(labels)
         bin_count = np.asarray([x[1] for x in sorted(cntr.items(), key=itemgetter(0))])
@@ -375,7 +342,7 @@ class GAM(object):
     def _get_class_weights(self,labels):
         return self.class_weights[np.asarray((labels + 1)/2, dtype=int)]
 
-    def train(self, data, labels, n_iter=10, learning_rate=0.01, display_step=25, sample_fraction=1.0):
+    def train(self, data, labels, n_iter=10, learning_rate=0.01, sample_fraction=1.0, num_bags=1, num_workers=1):
         if not self.initialized:
             data, labels = self._init_shapes_and_data(data, labels)
         else:
@@ -387,12 +354,13 @@ class GAM(object):
         self._check_input(data, labels)
 
         if self.balancer == 'global_upsample':
-            data, labels = self._upsample_minority_class(data, labels)
+            data, labels = sh.upsample_minority_class(data, labels, random_seed=self.balancer_seed)
         elif self.balancer == 'global_downsample':
-            data, labels = self._downsample_majority_class(data, labels)
+            data, labels = sh.downsample_majority_class(data, labels, random_seed=self.balancer_seed)
         elif self.balancer == 'class_weights':
             self._initialize_class_weights(labels)
 
+        start = time.time()
         for epoch in range(n_iter):
             self._recording['epoch'] += 1
 
@@ -401,27 +369,64 @@ class GAM(object):
             else:
                 lr = learning_rate
 
-            x_train, x_test, y_train, y_test = self._random_sample(data, labels, sample_fraction)
+            x_train, x_test, y_train, y_test, bags = sh.create_bags(data, labels, sample_fraction, num_bags, bagging_fraction=0.5, random_seed=self.balancer_seed)
 
-            if self.balancer == 'boosted_upsample':
-                x_train, y_train = self._upsample_minority_class(x_train, y_train)
-            elif self.balancer == 'boosted_downsample':
-                x_train, y_train = self._downsample_majority_class(x_train, y_train)
+            new_shapes = self._calculate_gradient_shape(x_train, y_train, bag_indices=bags, max_workers=num_workers)
 
-            class_weights = self._get_class_weights(y_train)
+            self.shapes = {dim: self.shapes[dim].add(shape.multiply(lr)) for dim, shape in new_shapes.iteritems()}
 
-            responses = self._get_pseudo_responses(x_train, y_train)
-            new_shapes = {name: self._get_shape_for_attribute(x_train[:, self._get_index_for_feature(name)], responses, class_weights, name) for name in self.feature_names}
+            acc, prec, prev, rec, auc = self._train_cost(x_test, y_test)
 
-            for dim, shape in self.shapes.iteritems():
-                self.shapes[dim] = shape.add(new_shapes[dim].multiply(lr))
+            sys.stdout.write("\r>> Epoch: {0:04d} / {1:04d}, elapsed time: {2:4.1f} m -- accuracy: {3:1.3f}, precision: {4:1.3f}, prevalence: {5:1.3f}, recall: {6:1.3f}, roc_auc: {7:1.3f}".format(epoch + 1, n_iter, (time.time()-start)/60, acc, prec, prev, rec, auc))
+            sys.stdout.flush()
 
-            acc, prec, rec, auc = self._train_cost(x_test, y_test)
-            if (epoch + 1) % display_step == 0:
-                print "Epoch:", '{0:04d} / {1:04d}'.format(epoch + 1, n_iter)
-                print "accuracy: {}, precision: {}, recall: {}, roc_auc: {}\n".format(acc, prec, rec, auc)
+        sys.stdout.write('\n')
+        sys.stdout.flush()
 
         self.is_fit = True
+
+    def _calculate_gradient_shape(self, data, labels, bag_indices=None, max_workers=1):
+
+        if bag_indices is None:
+            bag_indices = range(len(labels))
+
+        for bag_idx, bag in enumerate(bag_indices):
+            x_train = data[bag, :]
+            y_train = labels[bag]
+
+            if self.balancer == 'boosted_upsample':
+                x_train, y_train = sh.upsample_minority_class(x_train, y_train, random_seed=self.balancer_seed)
+            elif self.balancer == 'boosted_downsample':
+                x_train, y_train = sh.downsample_majority_class(x_train, y_train, random_seed=self.balancer_seed)
+            class_weights = self._get_class_weights(y_train)
+            responses = self._get_pseudo_responses(x_train, y_train)
+            with futures.ProcessPoolExecutor(max_workers=max_workers) as executors:
+                lst_of_futures = [executors.submit(_get_shape_for_attribute,
+                                                   x_train[:, self._get_index_for_feature(name)],
+                                                   responses,
+                                                   class_weights,
+                                                   name,
+                                                   self.criterion,
+                                                   self.splitter,
+                                                   self.max_depth,
+                                                   self.min_samples_split,
+                                                   self.min_samples_leaf,
+                                                   self.min_weight_fraction_leaf,
+                                                   self.max_features,
+                                                   self.random_state,
+                                                   self.max_leaf_nodes,
+                                                   self.presort) for name in self.feature_names]
+
+                results = [f.result() for f in futures.as_completed(lst_of_futures)]
+
+            if bag_idx == 0:
+                new_shapes = {res[0]: res[1] for res in results}
+
+            else:
+                old_shapes = new_shapes.copy()
+                new_shapes = {res[0]: old_shapes[res[0]].add(res[1]) for res in results}
+
+        return {name: shape.multiply(1 / len(bag_indices)) for name, shape in new_shapes.iteritems()}
 
     def serialize(self, model_name, file_path=None):
 
@@ -449,7 +454,6 @@ class GAM(object):
                 'random_state': self.random_state,
                 'max_leaf_nodes': self.max_leaf_nodes,
                 'presort': self.presort,
-                'type': str(self.dtr.__class__)
             },
             'serialization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S%z')
         }

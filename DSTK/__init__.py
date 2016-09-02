@@ -1,2 +1,2 @@
 __version__ = '0.0.1'
-__all__ = ['GAM', 'Distinctor', 'AutoEncoder', 'BoostedFeatureSelectors']
+__all__ = ['GAM', 'Distinctor', 'AutoEncoder', 'BoostedFeatureSelectors', 'utils']

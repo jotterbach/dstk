@@ -21,7 +21,8 @@ setup(
         'tensorflow',
         'sklearn',
         'pandas',
-        'fuzzywuzzy'
+        'fuzzywuzzy',
+        'futures'
     ],
     tests_require=[
         'pytest'
