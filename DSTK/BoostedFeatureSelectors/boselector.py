@@ -104,7 +104,7 @@ class Botree(BaseSelector):
 
        """
 
-    def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
+    def __init__(self, bootstrap_fraction, random_seed=None, feature_importance_metric=None, feature_importance_threshold=None, **kwargs):
 
         self.criterion = kwargs.get('criterion', "gini")
         self.splitter = kwargs.get('splitter', "best")
@@ -132,7 +132,7 @@ class Botree(BaseSelector):
             presort=self.presort
         )
 
-        super(Botree, self).__init__(bootstrap_fraction, self.dtc, random_seed=random_seed)
+        super(Botree, self).__init__(bootstrap_fraction, self.dtc, random_seed=random_seed, feature_importance_metric=feature_importance_metric, feature_importance_threshold=feature_importance_threshold)
 
     def _get_feature_coeff(self):
         return self.dtc.feature_importances_.flatten().tolist()

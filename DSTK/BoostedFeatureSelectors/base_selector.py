@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import sys
 import time
+from DSTK.utils import sampling_helpers as sh
+from sklearn.metrics import precision_score, accuracy_score, recall_score, roc_auc_score
 
 import abc
 
@@ -15,7 +17,7 @@ class BaseSelector(object):
     def _get_feature_coeff(self):
         raise NotImplementedError
 
-    def __init__(self, bootstrap_fraction, classifier, random_seed=None):
+    def __init__(self, bootstrap_fraction, classifier, random_seed=None, feature_importance_metric=None, feature_importance_threshold=None):
         self.initialized = False
 
         self.num_bootstraps = 0
@@ -23,25 +25,34 @@ class BaseSelector(object):
         self.random_seed = random_seed
 
         self.clf = classifier
+        self.feature_importance_metric = feature_importance_metric
+        self.feature_importance_threshold = feature_importance_threshold
+
+        if feature_importance_metric:
+            assert feature_importance_threshold, "If feature permutation importance is to be calculated, a threshold has to be set!"
 
         self.attributes = None
         self.coeff_df = None
 
-    def _init_botree_df(self, data, labels):
+    def _get_feature_importance_metric_func(self):
+        if self.feature_importance_metric == 'accuracy':
+            return accuracy_score
+        elif self.feature_importance_metric == 'recall':
+            return recall_score
+        elif self.feature_importance_metric == 'precision':
+            return precision_score
+        elif self.feature_importance_metric == 'roc_auc':
+            return roc_auc_score
+        else:
+            raise NotImplementedError("The requested metric is not implemented. Allowed are: 'accuracy', 'recall', 'precision', 'roc_auc'.")
+
+    def _init_boselector_df(self, data, labels):
         self.attributes = data.columns
-        self.coeff_df = pd.DataFrame(columns=self. attributes)
+        self.coeff_df = pd.DataFrame()
 
         self.initialized = True
 
         return data.as_matrix(), labels.values
-
-    def _get_bootstrap_sample(self, data, labels):
-        if self.random_seed:
-            np.random.seed(self.random_seed)
-        indices = range(len(labels))
-        rand_idx = np.random.choice(indices, size=int(self.bootstrap_fraction * len(labels)), replace=True)
-
-        return data[rand_idx, :], labels[rand_idx]
 
     def fit(self, data, labels, epochs=10):
         """
@@ -54,7 +65,7 @@ class BaseSelector(object):
         """
 
         if not self.initialized:
-            data, labels = self._init_botree_df(data, labels)
+            data, labels = self._init_boselector_df(data, labels)
         else:
             if isinstance(data, pd.core.frame.DataFrame):
                 data = data.as_matrix()
@@ -64,9 +75,18 @@ class BaseSelector(object):
         start = time.time()
         for m in range(epochs):
 
-            boot_data, boot_labels = self._get_bootstrap_sample(data, labels)
+            boot_data, oob_data, boot_labels, oob_labels = sh.random_sample(data,
+                                                                            labels,
+                                                                            sample_fraction=int(self.bootstrap_fraction * len(labels)),
+                                                                            random_seed=self.random_seed)
+
             self.clf.fit(boot_data, boot_labels)
-            self.coeff_df = self.coeff_df.append(pd.Series({attr: coef for attr, coef in zip(self.attributes, self._get_feature_coeff())}), ignore_index=True)
+            boselector_metrics_dct = {attr + '__classifier_feature_coeff': coef for attr, coef in zip(self.attributes, self._get_feature_coeff())}
+
+            if self.feature_importance_metric:
+                boselector_metrics_dct = self._calculate_feature_importance(oob_data, oob_labels)
+
+            self.coeff_df = self.coeff_df.append(pd.Series(boselector_metrics_dct), ignore_index=True)
             self.num_bootstraps += 1
 
             sys.stdout.write("\r>> Iteration: {0:0d}/{1:0d}, elapsed time:{2:4.1f} s".format(m+1, epochs, time.time()-start))
@@ -74,20 +94,45 @@ class BaseSelector(object):
         sys.stdout.write('\n')
         sys.stdout.flush()
 
+    def _calculate_feature_importance(self, oob_data, oob_labels):
+
+        dct = dict()
+        for col_idx in np.where(np.asarray(self._get_feature_coeff()) != 0)[0]:
+            mean_oob_perm = np.mean(np.asarray([self._get_metrics(sh.permute_column_of_numpy_array(oob_data, col_idx), oob_labels) for i in range(10)]), axis=0)
+            oob_value = self._get_metrics(oob_data, oob_labels)
+            diff = (oob_value - mean_oob_perm) / oob_value
+
+            dct.update({self.attributes.tolist()[col_idx]: diff})
+
+        return dct
+
+    def _get_metrics(self, oob_data, oob_labels):
+        oob_proba = self.clf.predict_proba(oob_data)[:, 1]
+        if self.feature_importance_metric == 'roc_auc':
+            return self._get_feature_importance_metric_func()(oob_labels, oob_proba)
+        else:
+            oob_predictions = oob_proba >= self.feature_importance_threshold
+            return self._get_feature_importance_metric_func()(oob_labels, oob_predictions)
+
     def _calculate_stats(self, row):
-        return pd.Series({'coef_mean': row[row != 0].mean(),
-                          'coef_std': row[row != 0].std(),
+
+        metric = 'coef'
+        if self.feature_importance_metric:
+            metric = self.feature_importance_metric + '_diff'
+
+        return pd.Series({metric + '_mean': row[row != 0].mean(),
+                          metric + '_std': row[row != 0].std(),
                           'num_occurence': (row != 0).sum(),
                           'frac_occurence': (row != 0).sum() / self.num_bootstraps})
 
-    def get_feature_stats(self):
+    def get_feature_stats(self, sort_key = 'frac_occurence'):
         """
         Returns summary statistics like mean and number of occurences for the boosted-selected features
 
         :return: Pandas DataFrame
         """
         if self.initialized:
-            return self.coeff_df.apply(self._calculate_stats).T.sort_values(by='num_occurence', ascending=False)
+            return self.coeff_df.apply(self._calculate_stats).T.sort_values(by=sort_key, ascending=False)
         else:
             raise ValueError("You need to fit the selector first.")
 

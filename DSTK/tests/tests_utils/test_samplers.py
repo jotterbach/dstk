@@ -37,3 +37,19 @@ def test_upsample():
     cntr = Counter(up_labels)
     assert cntr.get(1) == max_size
     assert cntr.get(1) == cntr.get(-1)
+
+
+def test_permuter():
+    arr = np.array([[1, 1],
+                    [2, 2],
+                    [3, 3],
+                    [4, 4],
+                    [5, 5]])
+
+    assert_arr = np.array([[1, 2],
+                           [2, 5],
+                           [3, 3],
+                           [4, 1],
+                           [5, 4]])
+
+    assert sh.permute_column_of_numpy_array(arr, 1, random_seed=42).tolist() == assert_arr.tolist()

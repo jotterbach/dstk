@@ -73,3 +73,13 @@ def create_bags(data, label, sample_fraction, num_bags, bagging_fraction, random
     bag_size = int(bagging_fraction * x_train.shape[0])
     bags = [np.random.permutation(x_train.shape[0])[:bag_size] for bag_idx in range(num_bags)]
     return x_train, x_test, y_train, y_test, bags
+
+
+def permute_column_of_numpy_array(array, col_idx, random_seed=None):
+    if random_seed:
+        np.random.seed(random_seed)
+
+    perm_array = array.copy()
+
+    perm_array[:, col_idx] = np.random.permutation(perm_array[:, col_idx])
+    return perm_array

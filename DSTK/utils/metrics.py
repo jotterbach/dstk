@@ -18,29 +18,52 @@ def _calculate_tp_tn_fp_fn(actual_label, predicted_label, pos_class_label, neg_c
 
 
 def _calculate_metrics(tp, tn, fp, fn):
-    if (tp + fp) > 0:
-        precision = tp / (tp + fp)
-    else:
-        precision = 0
 
-    if (tp + fn) > 0:
-        recall = tp / (tp + fn)
-    else:
-        recall \
-            = 0
-    accuracy = (tp + tn) / (tp + tn + fp + fn)
+    precision = precision_score(tp, fp)
+
+    recall = recall_score(fn, tp)
+
+    accuracy = accuracy_score(fn, fp, tn, tp)
+
     support = int(tp + fn)
 
+    f1 = f1_score(precision, recall)
+
+    population_prior = prior(fn, fp, tn, tp)
+
+    prevalence = prevalence_score(fn, fp, tn, tp)
+
+    return prevalence, precision, recall, accuracy, f1, population_prior, support
+
+
+def prevalence_score(fn, fp, tn, tp):
+    return (tp + fp) / (tp + tn + fp + fn)
+
+
+def prior(fn, fp, tn, tp):
+    return (tp + fn) / (tp + tn + fp + fn)
+
+
+def accuracy_score(fn, fp, tn, tp):
+    return (tp + tn) / (tp + tn + fp + fn)
+
+
+def f1_score(precision, recall):
     if (precision + recall) > 0:
-        f1 = 2 * precision * recall / (precision + recall)
-    else:
-        f1 = 0
+        return 2 * precision * recall / (precision + recall)
+    return 0
 
-    prior = (tp + fn) / (tp + tn + fp + fn)
 
-    prevalence = (tp + fp) / (tp + tn + fp + fn)
+def recall_score(fn, tp):
+    if (tp + fn) > 0:
+        return tp / (tp + fn)
+    return 0
 
-    return prevalence, precision, recall, accuracy, f1, prior, support
+
+def precision_score(tp, fp):
+    if (tp + fp) > 0:
+        return tp / (tp + fp)
+    return 0
 
 
 def get_all_metrics(actual_label, predicted_label, **kwargs):
