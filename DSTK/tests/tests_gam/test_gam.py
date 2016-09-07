@@ -132,6 +132,12 @@ def test_pseudo_response():
                                    err_msg="Pseudo Response doesn't match")
 
 
+def test_correct_shape_addition():
+    func1 = ShapeFunction(_create_partition(np.linspace(1, 10, 10)), np.linspace(1, 10, 11), 'attr_1')
+    func2 = func1.add(func1).multiply(0.5)
+    assert func1.equals(func2)
+
+
 def _create_partition(lst_of_splits):
     return np.append(lst_of_splits, np.PINF)
 

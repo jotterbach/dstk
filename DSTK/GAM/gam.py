@@ -64,8 +64,8 @@ class ShapeFunction(object):
 
         assert self.name == other.name, "Cannot add shapes of different features"
 
-        new_splits = self.splits
-        new_vals = self.values
+        new_splits = self.splits.copy()
+        new_vals = self.values.copy()
 
         for split, val in zip(other.splits, other.values):
             idx = np.searchsorted(new_splits, split, side='right')
@@ -247,6 +247,7 @@ class GAM(object):
 
         self.balancer = kwargs.get('balanced', None)
         self.balancer_seed = kwargs.get('balancer_seed', None)
+        self.influence_trimming_threshold = kwargs.get('influence_trimming_threshold', None)
 
         _allowed_balancers = ['global_upsample', 'global_downsample', 'boosted_upsample', 'boosted_downsample', 'class_weights']
 
@@ -260,9 +261,20 @@ class GAM(object):
     def logit_score(self, vec):
         return np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])
 
-    def score(self, vec):
-        return sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])),\
-               sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))
+    def _score_single_record(self, vec):
+        return [sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])), \
+                sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))]
+
+    def score(self, X):
+        if isinstance(X, pandas.core.frame.DataFrame):
+            data = X.as_matrix()
+        else:
+            data = X
+
+        if data.ndim == 1:
+            return self._score_single_record(data)
+        if data.ndim == 2:
+            return np.asarray([self._score_single_record(vec) for vec in data])
 
     def _train_cost(self, data, labels):
         pred_scores = np.asarray([self.score(vec) for vec in data], dtype='float')
@@ -284,7 +296,7 @@ class GAM(object):
                roc_auc_score(labels, pred_scores[:, 1])
 
     def _get_pseudo_responses(self, data, labels):
-        return [2 * label * sigmoid(-2 * label * self.logit_score(vec)) for vec, label in zip(data, labels)]
+        return np.asarray([2 * label * sigmoid(-2 * label * self.logit_score(vec)) for vec, label in zip(data, labels)])
 
     def _init_shapes_and_data(self, data, labels):
 
@@ -305,7 +317,7 @@ class GAM(object):
         assert self._n_features is not None, "Number of attributes is None"
 
         self.shapes = {name: ShapeFunction([np.PINF],
-                                           [np.log(cntr.get(1, 0) / cntr.get(-1, 1)) / (2 * self._n_features)],
+                                           [0.0],
                                            name)
                        for name in self.feature_names}
         self.initialized = True
@@ -385,6 +397,14 @@ class GAM(object):
 
         self.is_fit = True
 
+    def _get_trimmed_record_indices(self, responses):
+        weights = np.abs(responses) * (2 - np.abs(responses))
+        sum_weights = weights.sum()
+        sorted_idx = np.argsort(weights).flatten()
+        truncate_idx = (np.cumsum(weights[sorted_idx]) <= self.influence_trimming_threshold * sum_weights).sum()
+        return np.where(weights >= weights[sorted_idx[truncate_idx]])[0]
+
+
     def _calculate_gradient_shape(self, data, labels, bag_indices=None, max_workers=1):
 
         if bag_indices is None:
@@ -400,6 +420,12 @@ class GAM(object):
                 x_train, y_train = sh.downsample_majority_class(x_train, y_train, random_seed=self.balancer_seed)
             class_weights = self._get_class_weights(y_train)
             responses = self._get_pseudo_responses(x_train, y_train)
+
+            if self.influence_trimming_threshold:
+                train_records_idx = self._get_trimmed_record_indices(responses)
+                x_train = x_train[train_records_idx, :]
+                responses = responses[train_records_idx]
+
             with futures.ProcessPoolExecutor(max_workers=max_workers) as executors:
                 lst_of_futures = [executors.submit(_get_shape_for_attribute,
                                                    x_train[:, self._get_index_for_feature(name)],
