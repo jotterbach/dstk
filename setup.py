@@ -18,12 +18,14 @@ setup(
     url='https://github.com/jotterbach/dstk',
     install_requires=[
         'numpy',
+        'scipy',
         'tensorflow',
         'sklearn',
         'pandas',
         'fuzzywuzzy',
         'futures',
-        'statsmodels'
+        'statsmodels',
+        'patsy'
     ],
     tests_require=[
         'pytest'

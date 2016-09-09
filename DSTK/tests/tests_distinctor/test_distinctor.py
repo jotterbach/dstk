@@ -1,8 +1,10 @@
 import DSTK.Distinctor.distinctor as dst
 import pandas as pd
 from datetime import date
+import numpy as np
 
-data_dct ={
+
+data_dct = {
     'a': [1, 2, 3],
     'b': ['abc', 'bc', 'z'],
     'c': [1, 3, 4],
@@ -30,8 +32,7 @@ def test_distinctor():
 
 
 def test_distinctor_mean():
-
-    assert dstnctr.compute_match_vector_mean(test_df.ix[0], test_df.ix[1]) == 0.45863652695952728
-    assert dstnctr.compute_match_vector_mean(test_df.ix[0], test_df.ix[2]) == 0.4375
-    assert dstnctr.compute_match_vector_mean(test_df.ix[1], test_df.ix[2]) == 0.32946986029286063
+    np.testing.assert_almost_equal(dstnctr.compute_match_vector_mean(test_df.ix[0], test_df.ix[1]), 0.45863652695952728, 6)
+    np.testing.assert_almost_equal(dstnctr.compute_match_vector_mean(test_df.ix[0], test_df.ix[2]), 0.4375, 6)
+    np.testing.assert_almost_equal(dstnctr.compute_match_vector_mean(test_df.ix[1], test_df.ix[2]), 0.32946986029286063, 6)
 
