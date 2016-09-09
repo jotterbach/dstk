@@ -22,7 +22,8 @@ setup(
         'sklearn',
         'pandas',
         'fuzzywuzzy',
-        'futures'
+        'futures',
+        'statsmodels'
     ],
     tests_require=[
         'pytest'
