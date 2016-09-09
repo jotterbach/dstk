@@ -17,6 +17,7 @@ import time
 import DSTK.utils.sampling_helpers as sh
 import DSTK.utils.metrics as metrics
 from concurrent import futures
+from utils.p_splines import PSpline
 
 
 def sigmoid(x):
@@ -404,7 +405,6 @@ class GAM(object):
         truncate_idx = (np.cumsum(weights[sorted_idx]) <= self.influence_trimming_threshold * sum_weights).sum()
         return np.where(weights >= weights[sorted_idx[truncate_idx]])[0]
 
-
     def _calculate_gradient_shape(self, data, labels, bag_indices=None, max_workers=1):
 
         if bag_indices is None:
@@ -526,3 +526,47 @@ class GAM(object):
 
         assert set(gam.shapes.keys()) == set(gam.feature_names), 'feature names and shape names do not match up'
         return gam
+
+
+class SmoothGAM(GAM):
+
+    def __init__(self, gam):
+        self.gam = gam
+        self.smooth_shapes = dict()
+
+    def __getattr__(self, item):
+        try:
+            return self.gam.__getattribute__(item)
+        except AttributeError:
+            return self.__getattr__(item)
+
+    def smoothen(self, data, penalty=None):
+        if isinstance(penalty, np.ndarray):
+            penalties = penalty.tolist()
+        if penalty is None:
+            penalties = [0.0]
+        if isinstance(penalty, float):
+            penalties = [penalty]
+
+        for key, shape in self.gam.shapes.iteritems():
+            print 'processing shape `{}`'.format(key)
+            self.smooth_shapes.update({key: SmoothGAM._create_smooth_shape(shape, data[key], key, penalties)})
+
+    @staticmethod
+    def _create_smooth_shape(shape, values, name, penalties):
+        if shape.splits.shape == (2, ):
+            return shape
+        else:
+            target_vals = [shape.get_value(val) for val in values]
+            result = SmoothGAM._fit_spline(values, target_vals, penalties)
+            splits = np.unique(values)
+            smooth_values = result.predict(splits)
+            return ShapeFunction(splits, smooth_values, name)
+
+    @staticmethod
+    def _fit_spline(values, target_vals, penalties):
+
+        spl = PSpline()
+        gcv_error = [spl.fit(values, target_vals, penalty=penalty).gcv_score() for penalty in penalties]
+        opt_lambda = penalties[np.argmin(gcv_error)]
+        return spl.fit(values, target_vals, penalty=opt_lambda)
