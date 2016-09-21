@@ -2,17 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import DSTK
+from setuptools import setup, find_packages
 
-try:
-    from setuptools import setup
-except ImportError:
-    from distutils.core import setup
 
 setup(
     author="Johannes Otterbach",
     author_email="johannesotterbach@gmail.com",
     name="DSTK",
-    packages=['DSTK'],
+    packages=find_packages(exclude=["*.tests", "*.tests.*", "tests.*", "tests"]),
     version=DSTK.__version__,
     description="Data Science Toolkit",
     url='https://github.com/jotterbach/dstk',
@@ -25,7 +22,7 @@ setup(
         'fuzzywuzzy',
         'futures',
         'statsmodels',
-        'patsy'
+        'patsy',
     ],
     tests_require=[
         'pytest'
