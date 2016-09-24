@@ -1,6 +1,11 @@
 import pytest
 import numpy as np
 import DSTK.GAM.utils.p_splines as ps
+import sklearn.datasets as ds
+
+cancer_ds = ds.load_breast_cancer()
+data = cancer_ds['data']
+target = cancer_ds['target']
 
 
 def test_get_basis_matrix_for_array():
@@ -28,5 +33,18 @@ def test_flatten_basis_matrix_for_regression():
 
     base_set = ps._flatten_basis_for_fitting(arr, num_percentiles=2)
 
+    print base_set.shape
+
     np.testing.assert_array_equal(base_set, manual_concat)
+
+
+def test_p_spline_fitting():
+    spline_fitter = ps.ClassificationPSplines()
+
+    filter_data = data[:, :10]
+    print filter_data.shape
+
+    spline_fitter.fit(filter_data, target, penalty=1e-2)
+
+    print spline_fitter._get_shape(1, filter_data[:, 1]).shape
 

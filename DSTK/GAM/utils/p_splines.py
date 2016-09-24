@@ -5,6 +5,8 @@ from statsmodels import api as sm
 from sklearn.linear_model import LinearRegression, Ridge, Lasso
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+import time
+import sys
 
 
 def _get_percentiles(values, num_percentiles=10):
@@ -38,19 +40,6 @@ def _sigmoid(x):
 sigmoid = np.frompyfunc(_sigmoid, 1, 1)
 
 
-def _logit(x):
-    if (x < 0) or (x > 1):
-        raise ValueError("Value needs to be in interval [0, 1]")
-
-
-    # if x >= 0.5:
-    return np.log(x / (1-x))
-    # elif x >
-    #     return -1 * np.log((1 - x) / x)
-
-logit = np.frompyfunc(_logit, 1, 1)
-
-
 def _get_basis_vector(vals, knots, with_intercept=True):
     if with_intercept:
         if isinstance(vals, float):
@@ -62,22 +51,6 @@ def _get_basis_vector(vals, knots, with_intercept=True):
             return np.asarray([vals] + R(vals, knots).tolist())
         else:
             return np.asarray([[val] + R(val, knots).tolist() for val in vals])
-
-
-def _get_basis_for_array(array, num_percentiles=10, with_intercept=False):
-    return np.asarray([_get_basis_vector(array[:, idx], _get_percentiles(array[:, idx], num_percentiles=num_percentiles), with_intercept=with_intercept).transpose() for idx in range(array.shape[1])]).transpose()
-
-
-def _flatten_basis_for_fitting(array, num_percentiles=10):
-    # since we need to fix the intercept degree of freedom we add the intercept term manually and get the individual
-    # basis expansion without the intercept
-    basis_expansion = _get_basis_for_array(array, num_percentiles=num_percentiles, with_intercept=False)
-
-    flattened_basis = np.ones((basis_expansion.shape[0], 1))
-
-    for idx in range(basis_expansion.shape[2]):
-        flattened_basis = np.append(flattened_basis, basis_expansion[:, :, idx], axis=1)
-    return flattened_basis
 
 
 class PSpline(object):
@@ -141,8 +114,12 @@ class ClassificationPSplines(object):
         self.coeffs = None
         self.spline = None
         self.n_features = None
+        self.scaler = None
+        self._intercept = None
+        self._individual_feature_coeffs = None
+        self.scalers_ = dict()
 
-    def fit(self, data, targets, penalty=0.0):
+    def fit(self, data, targets):
 
         assert isinstance(data, np.ndarray), 'Data is not of type numpy.ndarray'
         if data.ndim == 2:
@@ -150,18 +127,13 @@ class ClassificationPSplines(object):
         else:
             self.n_features = 1
 
-        data_basis_expansion = _flatten_basis_for_fitting(data, num_percentiles=self.num_percentiles)
+        scaled_data = self._scale_transform(data)
+        self._create_knots_dict(data, self.num_percentiles)
 
-        # self._knots = _get_percentiles(data, num_percentiles=self.num_percentiles)
-        # self.basis_matrix = self._get_basis_vector(data)
-        self.coeffs = self._get_initial_coeffs(data.shape[0])
+        data_basis_expansion = self._flatten_basis_for_fitting(scaled_data)
 
-        X = data_basis_expansion
+        self.coeffs = self._get_initial_coeffs(scaled_data.shape[0])
         y = targets.tolist()
-
-        print self.n_features, data_basis_expansion.shape
-        print np.min(self.coeffs), np.max(self.coeffs)
-        print np.min(X), np.max(X)
 
         # X = np.vstack((data_basis_expansion, np.sqrt(penalty) * self._penalty_matrix()))
         # y = np.asarray(targets + np.zeros((self.num_percentiles + 2, 1)).flatten().tolist())
@@ -170,52 +142,80 @@ class ClassificationPSplines(object):
         old_norm = 1.0
         idx = 0
 
-        self.spline = Lasso(fit_intercept=True, normalize=False, alpha=penalty)
-        # scaler = MinMaxScaler(feature_range=(-1, 1))
-        # scaler = StandardScaler()
-
-        scaled_basis = X #scaler.fit_transform(X)
-
-        print np.min(scaled_basis), np.max(scaled_basis)
-
-        # print np.std(scaled_basis, axis=0)
-
+        start = time.time()
         while (np.abs(norm - old_norm) > self.tol * norm) and (idx < self.max_iter):
 
-            eta = np.dot(scaled_basis, self.coeffs)
-
-            # print 'eta: ', np.min(eta), np.max(eta)
+            eta = np.dot(data_basis_expansion, self.coeffs)
 
             mu = sigmoid(eta)
-            # print 'mu: ', np.min(mu), np.max(mu)
 
             # calculate residuals
-            z = (y - mu) / mu + eta
+            z = _residuals(y, mu, eta)
 
-            # print 'z: ', np.min(z), np.max(z)
+            self.spline = sm.OLS(z, data_basis_expansion).fit()
 
-            self.spline.fit(scaled_basis, z)
+            self.coeffs = self.spline.params
 
-            # self.coeffs[0] = self.spline.intercept_
-            self.coeffs = self.spline.coef_
-
-            # print 'coeffs: ', np.min(self.coeffs), np.max(self.coeffs)
             # hat_matrix_trace = self.spline.get_influence().hat_matrix_diag[:n].sum()
 
             old_norm = norm
-            norm = np.sum((z[:data.shape[0]] - self.spline.predict(scaled_basis)) ** 2)
+            norm = np.sum((y - sigmoid(self.spline.predict(data_basis_expansion))) ** 2)
 
-            print 'norm: ', norm
+            sys.stdout.write("\r>> Iteration: {0:04d}, elapsed time: {1:4.1f} m, norm: {2:4.1f}".format(idx + 1, (time.time() - start) / 60, norm))
+            sys.stdout.flush()
 
             idx += 1
+        sys.stdout.write('\n')
+        sys.stdout.flush()
 
-        print "Num iterations: ", idx
+        self._intercept = self.coeffs[0]
+
+        # Note to get the regression coeefs we need to account for the individual
+        # feature of the attribute value itself in addition to the pentiles.
+        self._individual_feature_coeffs = self.coeffs[1:].reshape((self.n_features, self.num_percentiles + 1))
+
+
+    def _get_basis_for_array(self, array):
+        return np.asarray([_get_basis_vector(array[:, idx],
+                                             self._knots[idx],
+                                             with_intercept=False).transpose() for idx in range(array.shape[1])]).transpose()
+
+    def _create_knots_dict(self, data, num_percentiles):
+        self._knots = {dim_idx: _get_percentiles(data[:, dim_idx], num_percentiles=num_percentiles) for dim_idx in range(data.shape[1])}
+
+    def _flatten_basis_for_fitting(self, array):
+        # since we need to fix the intercept degree of freedom we add the intercept term manually and get the individual
+        # basis expansion without the intercept
+        basis_expansion = self._get_basis_for_array(array)
+
+        flattened_basis = np.ones((basis_expansion.shape[0], 1))
+
+        for idx in range(basis_expansion.shape[2]):
+            flattened_basis = np.append(flattened_basis, basis_expansion[:, :, idx], axis=1)
+        return flattened_basis
+
+    def _scale_transform(self, data):
+        transformed_data = data.copy()
+        for dim_idx in range(self.n_features):
+            scaler = _MinMaxScaler('dim_' + str(dim_idx))
+            transformed_data[:, dim_idx] = scaler.fit_transform(data[:, dim_idx])
+            self.scalers_.update({dim_idx: scaler})
+
+        return transformed_data
 
     def _get_basis_vector(self, vals):
         if isinstance(vals, float):
             return np.asarray([1, vals] + R(vals, self._knots).tolist())
         else:
             return np.asarray([[1, val] + R(val, self._knots).tolist() for val in vals])
+
+    def _get_shape(self, feature_idx, vals):
+        scaler = self.scalers_.get(feature_idx)
+        scaled_vals = scaler.transform(vals)
+
+        basis_expansion = np.asarray([_get_basis_vector(scaled_vals, self._knots[feature_idx], with_intercept=True)]).squeeze()
+        feature_coeffs = np.asarray([self._intercept / self.n_features] + self._individual_feature_coeffs[feature_idx, :].tolist())
+        return np.dot(basis_expansion, feature_coeffs)
 
     def _get_initial_coeffs(self, n_samples):
         coeffs = np.zeros(((self.num_percentiles + 1) * self.n_features + 1, )).flatten()
@@ -228,4 +228,45 @@ class ClassificationPSplines(object):
         return S
 
     def predict(self, data):
-        return sigmoid(self.spline.predict(_flatten_basis_for_fitting(data, num_percentiles=self.num_percentiles)))
+        scaled_data = self._scale_transform(data)
+        return sigmoid(self.spline.predict(self._flatten_basis_for_fitting(scaled_data)))
+
+
+def _calculate_residuals(y, mu, eta):
+    # return (y - mu) / mu #+ eta
+    if y > 0:
+        ratio = np.exp(np.log(y) - np.log(mu))
+    else:
+        ratio = 0.0
+    return ratio - 1 #+ eta
+
+_residuals = np.frompyfunc(_calculate_residuals, 3, 1)
+
+
+class _MinMaxScaler(object):
+
+    def __init__(self, name):
+        self.name = name
+        self._range_min = -1.0
+        self._range_max = 1.0
+        self.scale = None
+        self.min_val = None
+        self.max_val = None
+
+    def fit(self, values):
+        data = np.asarray(values, dtype=float)
+
+        self.min_val = data.min()
+        self.max_val = data.max()
+
+        self.scale = (self.max_val - self.min_val) / (self._range_max - self._range_min)
+        return self
+
+    def transform(self, values):
+        data = np.asarray(values, dtype=float)
+
+        return data / self.scale + (self._range_min - self.min_val / self.scale)
+
+    def fit_transform(self, values):
+        self.fit(values)
+        return self.transform(values)
