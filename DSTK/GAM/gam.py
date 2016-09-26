@@ -48,9 +48,7 @@ class ShapeFunction(object):
         self.name = name
 
     def get_value(self, feature_value):
-        idx = np.searchsorted(self.splits, feature_value, side='right')
-        if idx == len(self.splits):
-            idx = -1
+        idx = np.digitize(feature_value, self.splits)
         return self.values[idx]
 
     def multiply(self, const):
