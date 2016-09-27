@@ -4,7 +4,7 @@ from sklearn.tree import DecisionTreeClassifier
 import numpy as np
 
 
-def _recurse_tree(tree, lst, node_id=0, depth=0, min_val=np.NINF, max_val=np.PINF):
+def _recurse_tree(tree, lst, mdlp, node_id=0, depth=0, min_val=np.NINF, max_val=np.PINF):
     left_child = tree.children_left[node_id]
     right_child = tree.children_right[node_id]
 
@@ -12,18 +12,82 @@ def _recurse_tree(tree, lst, node_id=0, depth=0, min_val=np.NINF, max_val=np.PIN
         lst.append(((min_val, max_val), tree.value[node_id].flatten().tolist()))
         return
     else:
-        _recurse_tree(tree, lst, left_child, depth=depth + 1, min_val=min_val, max_val=tree.threshold[node_id])
+        if mdlp and _check_mdlp_stop(tree, node_id):
+            lst.append(((min_val, max_val), tree.value[node_id].flatten().tolist()))
+            return
+        _recurse_tree(tree, lst, mdlp, left_child, depth=depth + 1, min_val=min_val, max_val=tree.threshold[node_id])
 
     if right_child == sklearn.tree._tree.TREE_LEAF:
         lst.append(((min_val, max_val), tree.value[node_id].flatten().tolist()))
         return
     else:
-        _recurse_tree(tree, lst, right_child, depth=depth + 1, min_val=tree.threshold[node_id], max_val=max_val)
+        if mdlp and _check_mdlp_stop(tree, node_id):
+            lst.append(((min_val, max_val), tree.value[node_id].flatten().tolist()))
+            return
+        _recurse_tree(tree, lst, mdlp, right_child, depth=depth + 1, min_val=tree.threshold[node_id], max_val=max_val)
 
 
 def _convert_to_conditional_proba_buckets(sorted_nodes):
     return [(bucket, (vals / np.sum(vals)).tolist()) for bucket, vals in sorted_nodes]
 
+
+def _check_mdlp_stop(tree, node_id):
+    """
+    The MDLP implementation follows the paper of
+
+        U. S. Fayyad and K. B. Irani, Multi-Interval Discretization of Continuous-Valued Attributes for Classification Learning, JPL TRS 1992
+        http://hdl.handle.net/2014/35171
+    """
+
+    num_samples = tree.value[node_id].flatten().sum()
+
+    gain = _calculate_gain(tree, node_id)
+    delta = _calculate_noise_delta(tree, node_id)
+
+    return gain < (delta + np.log2(num_samples - 1)) / num_samples
+
+
+def _calculate_entropy(array):
+    non_zero_array = array / array.sum()
+    return -1 * np.sum(non_zero_array * np.log2(non_zero_array))
+
+
+def _calculate_gain(tree, node_id):
+    S, nS, S1, nS1, S2, nS2 = _get_variables_for_entropy_calculation(tree, node_id)
+
+    return _calculate_entropy(S) \
+            - S1.sum() / S.sum() * _calculate_entropy(S1) \
+            - S2.sum() / S.sum() * _calculate_entropy(S2)
+
+
+def _calculate_noise_delta(tree, node_id):
+    S, nS, S1, nS1, S2, nS2 = _get_variables_for_entropy_calculation(tree, node_id)
+
+    return np.log2(np.power(3, nS) - 2) \
+            - (nS * _calculate_entropy(S)
+            - nS1 * _calculate_entropy(S1)
+            - nS2 * _calculate_entropy(S2))
+
+
+def _get_variables_for_entropy_calculation(tree, node_id):
+    left_child = tree.children_left[node_id]
+    right_child = tree.children_right[node_id]
+
+    full_set_values = tree.value[node_id].flatten()
+    left_set_values = tree.value[left_child].flatten()
+    right_set_values = tree.value[right_child].flatten()
+
+    # remove zeros from value_counts to continue processing
+    full_set_without_zero_counts = full_set_values[np.where(full_set_values > 0)[0]]
+    full_set_tree_classes = full_set_without_zero_counts.size
+
+    left_set_without_zero_counts = left_set_values[np.where(left_set_values > 0)[0]]
+    left_set_tree_classes = left_set_without_zero_counts.size
+
+    right_set_without_zero_counts = right_set_values[np.where(right_set_values > 0)[0]]
+    right_set_tree_classes = right_set_without_zero_counts.size
+
+    return full_set_without_zero_counts, full_set_tree_classes, left_set_without_zero_counts, left_set_tree_classes, right_set_without_zero_counts, right_set_tree_classes
 
 class TreeBasedFeatureBinning(object):
 
@@ -44,6 +108,13 @@ class TreeBasedFeatureBinning(object):
         max_leaf_nodes = kwargs.get('max_leaf_nodes', None)
         class_weight = kwargs.get('class_weight', None)
         presort = kwargs.get('presort', False)
+
+        self.mdlp = kwargs.get('mdlp', False)
+
+        if self.mdlp:
+            criterion = 'entropy'
+            max_leaf_nodes = None
+            max_depth = None
 
         self.dtc = DecisionTreeClassifier(criterion=criterion,
                                           splitter=splitter,
@@ -103,7 +174,7 @@ class TreeBasedFeatureBinning(object):
             if (np.min(label_dist) > 0) & (len(label_dist) == 2):
                 lst_of_bins = list()
                 # recurse edits the list inplace
-                _recurse_tree(self.dtc.tree_, lst_of_bins)
+                _recurse_tree(self.dtc.tree_, lst_of_bins, self.mdlp)
                 self._count_buckets = sorted(lst_of_bins, key=lambda x: x[0][0])
                 self.cond_proba_buckets = _convert_to_conditional_proba_buckets(self._count_buckets)
             else:
