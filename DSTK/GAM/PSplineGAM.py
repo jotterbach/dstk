@@ -7,6 +7,10 @@ import sys
 from DSTK.GAM.utils.p_splines import _get_percentiles, _get_basis_vector
 from DSTK.utils.function_helpers import sigmoid
 from DSTK.GAM.gam import ShapeFunction
+from DSTK.GAM.base_gam import BaseGAM
+import pandas
+from datetime import datetime
+from DSTK.utils import sampling_helpers as sh
 
 
 def _calculate_residuals(y, mu, eta):
@@ -20,7 +24,7 @@ def _calculate_residuals(y, mu, eta):
 _residuals = np.frompyfunc(_calculate_residuals, 3, 1)
 
 
-class PSplineGAM(object):
+class PSplineGAM(BaseGAM):
     """
     This class implements learning a cubic spline interpolation for a binary classification problem. The implementation
     is based on the P-IRLS algorithm as described in the book:
@@ -28,29 +32,65 @@ class PSplineGAM(object):
         Simon N. Woods, Generalized Additive Models, Chapman and Hall/CRC (2006)
     """
 
+    def _get_metadata_dict(self):
+        return {
+            'serialization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S%z')
+        }
+
     def __init__(self, **kwargs):
+        super(PSplineGAM, self).__init__()
         self.num_percentiles = kwargs.get('num_percentiles', 10)
         self.tol = kwargs.get('tol', 5e-4)
         self.max_iter = kwargs.get('max_iter', 1000)
+        self.balancer = kwargs.get('balancer', None)
+        self.balancer_seed = kwargs.get('balancer_seed', None)
         self._knots = None
         self.spline = None
         self.basis_matrix = None
         self.coeffs = None
         self.spline = None
-        self.n_features = None
         self.scaler = None
         self._intercept = None
         self._individual_feature_coeffs = None
         self.scalers_ = dict()
-        self.shapes = None
 
-    def fit(self, data, targets):
+        _allowed_balancers = ['global_upsample', 'global_downsample']
+
+        if not self.balancer is None:
+            if not self.balancer in _allowed_balancers:
+                raise NotImplementedError(
+                    "Balancing method '{}' not implemented. Choose one of {}.".format(self.balancer,
+                                                                                      _allowed_balancers))
+
+    def _init_properties(self, data, labels):
+        self.n_features = data.shape[1]
+
+        if isinstance(data, pandas.core.frame.DataFrame):
+            self.feature_names = data.columns.tolist()
+            data = data.as_matrix()
+
+        if self.feature_names is None:
+            self.feature_names = ['feature_{}'.format(dim) for dim in range(self.n_features)]
+
+        if isinstance(labels, pandas.core.series.Series):
+            labels = labels.values
+
+        return data, labels
+
+    def train(self, data, targets, **kwargs):
+
+        data, labels = self._init_properties(data, targets)
 
         assert isinstance(data, np.ndarray), 'Data is not of type numpy.ndarray'
         if data.ndim == 2:
             self.n_features = data.shape[1]
         else:
             self.n_features = 1
+
+        if self.balancer == 'global_upsample':
+            data, targets = sh.upsample_minority_class(data, targets, random_seed=self.balancer_seed)
+        elif self.balancer == 'global_downsample':
+            data, targets = sh.downsample_majority_class(data, targets, random_seed=self.balancer_seed)
 
         scaled_data = self._scale_transform(data)
         self._create_knots_dict(data, self.num_percentiles)
@@ -98,6 +138,8 @@ class PSplineGAM(object):
         # Note to get the regression coeefs we need to account for the individual
         # feature of the attribute value itself in addition to the pentiles.
         self._individual_feature_coeffs = self.coeffs[1:].reshape((self.n_features, self.num_percentiles + 1))
+        self._create_shape_functions(data)
+        self.is_fit = True
 
     def _get_basis_for_array(self, array):
         return np.asarray([_get_basis_vector(array[:, idx],
@@ -141,13 +183,14 @@ class PSplineGAM(object):
         feature_coeffs = np.asarray([self._intercept / self.n_features] + self._individual_feature_coeffs[feature_idx, :].tolist())
         return np.dot(basis_expansion, feature_coeffs)
 
-    def create_shape_functions(self, data):
+    def _create_shape_functions(self, data):
         shapes = dict()
-        for dim_idx in range(self.n_features):
+        for feat in self.feature_names:
+            dim_idx = self._get_index_for_feature(feat)
             splits = np.unique(data[:, dim_idx].flatten()).tolist()
             vals = self._get_shape(dim_idx, splits)
 
-            shapes[dim_idx] = ShapeFunction(splits, vals, str(dim_idx))
+            shapes[feat] = ShapeFunction(splits, vals, feat)
 
         self.shapes = shapes
 

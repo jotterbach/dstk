@@ -4,12 +4,8 @@ from sklearn.tree._tree import TREE_LEAF, TREE_UNDEFINED, Tree
 from sklearn.metrics import roc_auc_score
 import numpy as np
 from collections import Counter
-from operator import itemgetter
 import pandas
 from datetime import datetime
-import json as js
-import tarfile as tf
-import os
 import sys
 import time
 import DSTK.utils.sampling_helpers as sh
@@ -18,6 +14,7 @@ from concurrent import futures
 from DSTK.GAM.utils.p_splines import PSpline
 from DSTK.GAM.utils.shape_function import ShapeFunction
 from DSTK.utils.function_helpers import sigmoid
+from DSTK.GAM.base_gam import BaseGAM
 
 
 def _recurse(tree, feature_vec):
@@ -107,14 +104,10 @@ def _get_shape_for_attribute(attribute_data, labels, class_weights, feature_name
     return feature_name, _get_sum_of_gamma_correction(dtr.tree_, attribute_data, labels, class_weights, feature_name)
 
 
-class GAM(object):
+class GAM(BaseGAM):
 
     def __init__(self, **kwargs):
-        self.shapes = dict()
-        self.is_fit = False
-        self._n_features = None
-        self.initialized = False
-        self.feature_names = None
+        super(GAM, self).__init__()
         self.class_weights = np.ones(2)
         self._recording = {
             'epoch': 0,
@@ -149,26 +142,24 @@ class GAM(object):
             if not self.balancer in _allowed_balancers:
                 raise NotImplementedError("Balancing method '{}' not implemented. Choose one of {}.".format(self.balancer, _allowed_balancers))
 
-    def _get_index_for_feature(self, feature_name):
-        return self.feature_names.index(feature_name)
-
-    def logit_score(self, vec):
-        return np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])
-
-    def _score_single_record(self, vec):
-        return [sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])), \
-                sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))]
-
-    def score(self, X):
-        if isinstance(X, pandas.core.frame.DataFrame):
-            data = X.as_matrix()
-        else:
-            data = X
-
-        if data.ndim == 1:
-            return self._score_single_record(data)
-        if data.ndim == 2:
-            return np.asarray([self._score_single_record(vec) for vec in data])
+    def _get_metadata_dict(self):
+        return {
+            'training_metadata': self._recording,
+            'balancer': self.balancer,
+            'DecisionTreeRegressor_meta_data': {
+                'criterion': self.criterion,
+                'splitter': self.splitter,
+                'max_depth': self.max_depth,
+                'min_samples_split': self.min_samples_split,
+                'min_samples_leaf': self.min_samples_leaf,
+                'min_weight_fraction_leaf': self.min_weight_fraction_leaf,
+                'max_features': self.max_features,
+                'random_state': self.random_state,
+                'max_leaf_nodes': self.max_leaf_nodes,
+                'presort': self.presort,
+            },
+            'serialization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S%z')
+        }
 
     def _train_cost(self, data, labels):
         pred_scores = np.asarray([self.score(vec) for vec in data], dtype='float')
@@ -194,21 +185,21 @@ class GAM(object):
 
     def _init_shapes_and_data(self, data, labels):
 
-        self._n_features = data.shape[1]
+        self.n_features = data.shape[1]
 
         if isinstance(data, pandas.core.frame.DataFrame):
             self.feature_names = data.columns.tolist()
             data = data.as_matrix()
 
         if self.feature_names is None:
-            self.feature_names = ['feature_{}'.format(dim) for dim in range(self._n_features)]
+            self.feature_names = ['feature_{}'.format(dim) for dim in range(self.n_features)]
 
         if isinstance(labels, pandas.core.series.Series):
             labels = labels.values
 
         cntr = Counter(labels)
         assert set(cntr.keys()) == {-1, 1}, "Labels must be encoded with -1, 1. Cannot contain more classes."
-        assert self._n_features is not None, "Number of attributes is None"
+        assert self.n_features is not None, "Number of attributes is None"
 
         self.shapes = {name: ShapeFunction([np.PINF],
                                            [0.0],
@@ -231,40 +222,33 @@ class GAM(object):
 
         return self._current_lr
 
-    @staticmethod
-    def _check_input(data, labels):
-        if not np.isfinite(data).ravel().any():
-            raise ValueError("Encountered invalid value in the training data")
-        if not np.isfinite(labels).any():
-            raise ValueError("Encountered invalid value in the target data")
-
-        assert len(data) == len(labels), "Data and Targets have different lentgth."
-
-    def _initialize_class_weights(self, labels):
-        cntr = Counter(labels)
-        bin_count = np.asarray([x[1] for x in sorted(cntr.items(), key=itemgetter(0))])
-        self.class_weights = bin_count.sum() / (2.0 * bin_count)
-
-    def _get_class_weights(self,labels):
+    def _get_class_weights(self, labels):
         return self.class_weights[np.asarray((labels + 1)/2, dtype=int)]
 
-    def train(self, data, labels, n_iter=10, learning_rate=0.01, sample_fraction=1.0, num_bags=1, num_workers=1):
+    def train(self, data, targets, **kwargs):
+
+        n_iter = kwargs.get('n_iter', 10)
+        learning_rate = kwargs.get('learning_rate', 0.01)
+        sample_fraction = kwargs.get('sample_fraction', 1.0)
+        num_bags = kwargs.get('num_bags', 1)
+        num_workers = kwargs.get('num_workers', 1)
+
         if not self.initialized:
-            data, labels = self._init_shapes_and_data(data, labels)
+            data, targets = self._init_shapes_and_data(data, targets)
         else:
             if isinstance(data, pandas.core.frame.DataFrame):
                 data = data.as_matrix()
-            if isinstance(labels, pandas.core.series.Series):
-                labels = labels.values
+            if isinstance(targets, pandas.core.series.Series):
+                targets = targets.values
 
-        self._check_input(data, labels)
+        self._check_input(data, targets)
 
         if self.balancer == 'global_upsample':
-            data, labels = sh.upsample_minority_class(data, labels, random_seed=self.balancer_seed)
+            data, targets = sh.upsample_minority_class(data, targets, random_seed=self.balancer_seed)
         elif self.balancer == 'global_downsample':
-            data, labels = sh.downsample_majority_class(data, labels, random_seed=self.balancer_seed)
+            data, targets = sh.downsample_majority_class(data, targets, random_seed=self.balancer_seed)
         elif self.balancer == 'class_weights':
-            self._initialize_class_weights(labels)
+            self._initialize_class_weights(targets)
 
         start = time.time()
         for epoch in range(n_iter):
@@ -275,7 +259,7 @@ class GAM(object):
             else:
                 lr = learning_rate
 
-            x_train, x_test, y_train, y_test, bags = sh.create_bags(data, labels, sample_fraction, num_bags, bagging_fraction=0.5, random_seed=self.balancer_seed)
+            x_train, x_test, y_train, y_test, bags = sh.create_bags(data, targets, sample_fraction, num_bags, bagging_fraction=0.5, random_seed=self.balancer_seed)
 
             new_shapes = self._calculate_gradient_shape(x_train, y_train, bag_indices=bags, max_workers=num_workers)
 
@@ -347,85 +331,20 @@ class GAM(object):
 
         return {name: shape.multiply(1 / len(bag_indices)) for name, shape in new_shapes.iteritems()}
 
-    def serialize(self, model_name, file_path=None):
 
-        if file_path is None:
-            file_path = os.getcwd()
-
-        folder_path = '{}/{}'.format(file_path, model_name)
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
-
-        for shape in self.shapes.itervalues():
-            shape.serialize('{}/{}/shapes'.format(file_path, model_name), meta_data={'model_name': model_name})
-
-        meta_data_dct = {
-            'training_metadata': self._recording,
-            'balancer': self.balancer,
-            'DecisionTreeRegressor_meta_data': {
-                'criterion': self.criterion,
-                'splitter': self.splitter,
-                'max_depth': self.max_depth,
-                'min_samples_split': self.min_samples_split,
-                'min_samples_leaf': self.min_samples_leaf,
-                'min_weight_fraction_leaf': self.min_weight_fraction_leaf,
-                'max_features': self.max_features,
-                'random_state': self.random_state,
-                'max_leaf_nodes': self.max_leaf_nodes,
-                'presort': self.presort,
-            },
-            'serialization_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S%z')
-        }
-
-        dct = {
-            'model_name': model_name,
-            'num_features': self._n_features,
-            'feature_names': self.feature_names,
-            'metadata': meta_data_dct,
-            'shape_data': './shapes'
-            }
-
-        with open('{}/{}/{}.json'.format(file_path, model_name, model_name), 'w') as fp:
-            js.dump(dct, fp, sort_keys=True, indent=2, separators=(',', ': '))
-
-        GAM._make_tarfile('{}/{}.tar.gz'.format(file_path, model_name), '{}/{}'.format(file_path, model_name))
-
-    @staticmethod
-    def _make_tarfile(output_filename, source_dir):
-        with tf.open(output_filename, "w:gz") as tar:
-            tar.add(source_dir, arcname=os.path.basename(source_dir))
-
-    @staticmethod
-    def load_from_tar(file_name):
-
-        model_name = file_name.split('/')[-1].replace('.tar.gz', '')
-
-        gam = GAM()
-
-        with tf.open(file_name, "r:gz") as tar:
-            f = tar.extractfile('{}/{}.json'.format(model_name, model_name))
-            content = js.loads(f.read())
-            gam._recording = content['metadata']['training_metadata']
-            gam._n_features = content['num_features']
-            gam.feature_names = content['feature_names']
-
-            for member in tar.getmembers():
-                if member.isfile() and (member.name != '{}/{}.json'.format(model_name, model_name)):
-                    f = tar.extractfile(member.path)
-                    content = js.loads(f.read())
-                    gam.shapes.update({content['feature_name']: ShapeFunction(content['splits'],
-                                                                              content['values'],
-                                                                              content['feature_name'])})
-
-        assert set(gam.shapes.keys()) == set(gam.feature_names), 'feature names and shape names do not match up'
-        return gam
-
-
-class SmoothGAM(GAM):
+class SmoothGAM(BaseGAM):
 
     def __init__(self, gam):
+
+        assert isinstance(gam, BaseGAM)
+
+        super(SmoothGAM, self).__init__()
         self.gam = gam
-        self.smooth_shapes = dict()
+        self.feature_names = gam.feature_names
+        self.n_features = gam.n_features
+        self.is_fit = gam.is_fit
+        self.initialized = gam.initialized
+        self.shapes = dict()
 
     def __getattr__(self, item):
         try:
@@ -443,7 +362,7 @@ class SmoothGAM(GAM):
 
         for key, shape in self.gam.shapes.iteritems():
             print 'processing shape `{}`'.format(key)
-            self.smooth_shapes.update({key: SmoothGAM._create_smooth_shape(shape, data[key], key, penalties)})
+            self.shapes.update({key: SmoothGAM._create_smooth_shape(shape, data[key], key, penalties)})
 
     @staticmethod
     def _create_smooth_shape(shape, values, name, penalties):
