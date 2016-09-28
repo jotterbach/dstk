@@ -127,8 +127,6 @@ class PSplineGAM(BaseGAM):
 
             self.coeffs = self.spline.params
 
-            # hat_matrix_trace = self.spline.get_influence().hat_matrix_diag[:n].sum()
-
             old_norm = norm
             norm = np.sum((z - self.spline.predict(data_basis_expansion)) ** 2)
 
@@ -146,6 +144,17 @@ class PSplineGAM(BaseGAM):
         self._individual_feature_coeffs = self.coeffs[1:].reshape((self.n_features, self.num_percentiles + 1))
         self._create_shape_functions(data)
         self.is_fit = True
+        return self
+
+    def gcv_score(self):
+        X = self.spline.model.exog[:-(self.num_percentiles + 2), :]
+        n = X.shape[0]
+        y = self.spline.model.endog[:n]
+        y_hat = self.spline.predict(X)
+
+        hat_matrix_trace = self.spline.get_influence().hat_matrix_diag[:n].sum()
+
+        return n * np.power(y - y_hat, 2).sum() / np.power(n - hat_matrix_trace, 2)
 
     def _get_basis_for_array(self, array):
         return np.asarray([_get_basis_vector(array[:, self._get_index_for_feature(feat)],

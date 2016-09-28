@@ -98,3 +98,10 @@ def test_p_spline_penaly_matrix():
          [0., 0., 44.01780014, 92.35072019, 0., 52.3778662, 123.45090538],
          [0., 0., 30.33585812, 316.43060196, 0., 123.45090538, 670.46456651]],
         6)
+
+def test_gcv_score():
+    test_data = data[:, :2]
+    spline_fitter = psgam.PSplineGAM(num_percentiles=2)
+
+    spline_fitter.train(test_data, target, penalty=1e10)
+    np.testing.assert_almost_equal(spline_fitter.gcv_score(), 0.33410227247, 6)
