@@ -63,4 +63,4 @@ class PSpline(object):
         return n * np.power(y - y_hat, 2).sum() / np.power(n - hat_matrix_trace, 2)
 
     def predict(self, values):
-        return self.spline.predict(self._get_basis_vector(values))
+        return self.spline.predict(_get_basis_vector(values, self._knots))

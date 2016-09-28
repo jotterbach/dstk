@@ -4,6 +4,7 @@ from sklearn.tree._tree import TREE_LEAF, TREE_UNDEFINED, Tree
 from sklearn.metrics import roc_auc_score
 import numpy as np
 from collections import Counter
+from operator import itemgetter
 import pandas
 from datetime import datetime
 import sys
@@ -221,6 +222,11 @@ class GAM(BaseGAM):
             self._recording['learning_rate_schedule'].update({self._recording['epoch'] - 1: self._current_lr})
 
         return self._current_lr
+
+    def _initialize_class_weights(self, labels):
+        cntr = Counter(labels)
+        bin_count = np.asarray([x[1] for x in sorted(cntr.items(), key=itemgetter(0))])
+        self.class_weights = bin_count.sum() / (2.0 * bin_count)
 
     def _get_class_weights(self, labels):
         return self.class_weights[np.asarray((labels + 1)/2, dtype=int)]
