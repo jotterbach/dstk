@@ -98,3 +98,11 @@ def test_serialization_deserialization():
         np.testing.assert_almost_equal(np.sum(gam_scores), 1.0, 10)
         np.testing.assert_almost_equal(gam_scores, assert_scores[idx], 10)
 
+
+def test_feature_ranking():
+    gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42, balancer_seed=42)
+    gam.train(data[:, :3], labels, n_iter=5, learning_rate=0.0025, num_bags=1, num_workers=3)
+
+    assert gam.feature_value_pairs(data[:2, :3]) == \
+        [[('feature_2', -0.01203629528482458), ('feature_0', -0.011723317678495992), ('feature_1', -0.004096224819452929)],
+         [('feature_2', -0.01203629528482458), ('feature_0', -0.011723317678495992), ('feature_1', 0.0085166757804256213)]]
