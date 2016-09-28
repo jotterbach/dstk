@@ -28,6 +28,7 @@ def test_get_basis_matrix_for_array():
 
     arr = np.random.uniform(size=(100, 2))
 
+    gam.feature_names = ['feature_0', 'feature_1']
     gam._create_knots_dict(arr, gam.num_percentiles)
 
     knots0 = ps._get_percentiles(arr[:, 0], num_percentiles=5)
@@ -44,6 +45,7 @@ def test_flatten_basis_matrix_for_regression():
 
     arr = np.random.uniform(size=(4, 3))
 
+    gam.feature_names = ['feature_0', 'feature_1', 'feature_2']
     gam._create_knots_dict(arr, gam.num_percentiles)
 
     knots0 = ps._get_percentiles(arr[:, 0], num_percentiles=2)
@@ -68,10 +70,7 @@ def test_p_spline_fitting():
 
     np.testing.assert_array_almost_equal(
         spline_fitter.predict(data[:10, :]),
-        [0.38021172202232384, 0.077934743087122921, 0.29684891104959737,
-         0.22027919416405917, 0.60467894303470937, 0.12925950800213407,
-         0.33262495655469365, 0.24803627163131964, 0.15091752319056068,
-         0.14379721963252465],
+        [0.3802, 0.0779, 0.2968, 0.2203, 0.6047, 0.1293, 0.3326, 0.248, 0.1509, 0.1438],
         4)
 
 
@@ -82,3 +81,20 @@ def test_p_spline_fitting_with_dataframe():
 
     assert spline_fitter.feature_names == data_df.columns.tolist()
     assert set(spline_fitter.shapes.keys()) == set(data_df.columns.tolist())
+
+
+def test_p_spline_penaly_matrix():
+    test_data = data[:, :2]
+    spline_fitter = psgam.PSplineGAM(num_percentiles=2)
+
+    spline_fitter.train(test_data, target, penalty=1e10)
+    np.testing.assert_array_almost_equal(
+        spline_fitter._penalty_matrix(),
+        [[0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 51.19281748, 58.50501563, 0., 44.01780014, 30.33585812],
+         [0., 0., 58.50501563, 188.53382674, 0., 92.35072019, 316.43060196],
+         [0., 0., 0., 0., 0., 0., 0.],
+         [0., 0., 44.01780014, 92.35072019, 0., 52.3778662, 123.45090538],
+         [0., 0., 30.33585812, 316.43060196, 0., 123.45090538, 670.46456651]],
+        6)

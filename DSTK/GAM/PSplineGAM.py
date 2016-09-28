@@ -4,7 +4,7 @@ import numpy as np
 from statsmodels import api as sm
 import time
 import sys
-from DSTK.GAM.utils.p_splines import _get_percentiles, _get_basis_vector
+from DSTK.GAM.utils.p_splines import _get_percentiles, _get_basis_vector, R
 from DSTK.utils.function_helpers import sigmoid
 from DSTK.GAM.gam import ShapeFunction
 from DSTK.GAM.base_gam import BaseGAM
@@ -79,6 +79,8 @@ class PSplineGAM(BaseGAM):
 
     def train(self, data, targets, **kwargs):
 
+        penalty = kwargs.get('penalty', None)
+
         data, labels = self._init_properties(data, targets)
 
         assert isinstance(data, np.ndarray), 'Data is not of type numpy.ndarray'
@@ -98,10 +100,12 @@ class PSplineGAM(BaseGAM):
         data_basis_expansion = self._flatten_basis_for_fitting(scaled_data)
 
         self.coeffs = self._get_initial_coeffs(scaled_data.shape[0])
-        y = targets.tolist()
 
-        # X = np.vstack((data_basis_expansion, np.sqrt(penalty) * self._penalty_matrix()))
-        # y = np.asarray(targets + np.zeros((self.num_percentiles + 2, 1)).flatten().tolist())
+        if penalty:
+            data_basis_expansion = np.vstack((data_basis_expansion, np.sqrt(penalty) * self._penalty_matrix()))
+            y = np.asarray(targets.tolist() + np.zeros(((self.num_percentiles + 1) * self.n_features + 1, 1)).squeeze().tolist()).flatten().squeeze()
+        else:
+            y = np.asarray(targets.tolist())
 
         norm = 0.0
         old_norm = 1.0
@@ -116,6 +120,8 @@ class PSplineGAM(BaseGAM):
 
             # calculate residuals
             z = _residuals(y, mu, eta)
+            if penalty:
+                z[len(targets) + 1:] = np.zeros(((self.num_percentiles + 1) * self.n_features, 1)).squeeze()
 
             self.spline = sm.OLS(z, data_basis_expansion).fit()
 
@@ -124,7 +130,7 @@ class PSplineGAM(BaseGAM):
             # hat_matrix_trace = self.spline.get_influence().hat_matrix_diag[:n].sum()
 
             old_norm = norm
-            norm = np.sum((y - sigmoid(self.spline.predict(data_basis_expansion))) ** 2)
+            norm = np.sum((z - self.spline.predict(data_basis_expansion)) ** 2)
 
             sys.stdout.write("\r>> Iteration: {0:04d}, elapsed time: {1:4.1f} m, norm: {2:4.1f}".format(idx + 1, (time.time() - start) / 60, norm))
             sys.stdout.flush()
@@ -142,12 +148,12 @@ class PSplineGAM(BaseGAM):
         self.is_fit = True
 
     def _get_basis_for_array(self, array):
-        return np.asarray([_get_basis_vector(array[:, idx],
-                                             self._knots[idx],
-                                             with_intercept=False).transpose() for idx in range(array.shape[1])]).transpose()
+        return np.asarray([_get_basis_vector(array[:, self._get_index_for_feature(feat)],
+                                             self._knots[feat],
+                                             with_intercept=False).transpose() for feat in self.feature_names]).transpose()
 
     def _create_knots_dict(self, data, num_percentiles):
-        self._knots = {dim_idx: _get_percentiles(data[:, dim_idx], num_percentiles=num_percentiles) for dim_idx in range(data.shape[1])}
+        self._knots = {feat: _get_percentiles(data[:, self._get_index_for_feature(feat)], num_percentiles=num_percentiles) for feat in self.feature_names}
 
     def _flatten_basis_for_fitting(self, array):
         # since we need to fix the intercept degree of freedom we add the intercept term manually and get the individual
@@ -179,7 +185,7 @@ class PSplineGAM(BaseGAM):
         scaler = self.scalers_.get(feature_idx)
         scaled_vals = scaler.transform(vals)
 
-        basis_expansion = np.asarray([_get_basis_vector(scaled_vals, self._knots[feature_idx], with_intercept=True)]).squeeze()
+        basis_expansion = np.asarray([_get_basis_vector(scaled_vals, self._knots[self.feature_names[feature_idx]], with_intercept=True)]).squeeze()
         feature_coeffs = np.asarray([self._intercept / self.n_features] + self._individual_feature_coeffs[feature_idx, :].tolist())
         return np.dot(basis_expansion, feature_coeffs)
 
@@ -200,8 +206,22 @@ class PSplineGAM(BaseGAM):
         return coeffs
 
     def _penalty_matrix(self):
-        S = np.zeros((self.num_percentiles + 2, self.num_percentiles + 2))
-        S[2:, 2:] = np.real_if_close(sp.linalg.sqrtm(R.outer(self._knots, self._knots).astype(np.float64)), tol=10 ** 8)
+        S = np.zeros(((self.num_percentiles + 1) * self.n_features + 1, (self.num_percentiles + 1) * self.n_features + 1))
+
+        flat_knots = np.asarray([self._knots.get(feat) for feat in self.feature_names]).flatten()
+
+        penalty_matrix = np.real_if_close(sp.linalg.sqrtm(R.outer(flat_knots, flat_knots).astype(np.float64)), tol=10 ** 8)
+
+        penalty_matrix = np.insert(penalty_matrix,
+                                   np.arange(0, self.num_percentiles * self.n_features, self.num_percentiles),
+                                   0,
+                                   axis=1)
+        penalty_matrix = np.insert(penalty_matrix,
+                                   np.arange(0, self.num_percentiles * self.n_features, self.num_percentiles),
+                                   0,
+                                   axis=0)
+
+        S[1:, 1:] = penalty_matrix
         return S
 
     def predict(self, data):

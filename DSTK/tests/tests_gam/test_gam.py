@@ -4,6 +4,8 @@ from DSTK.GAM.gam import GAM, ShapeFunction
 from DSTK.tests.tests_gam.test_shape_function import _create_partition
 from DSTK.GAM.base_gam import load_from_tar
 import numpy as np
+import os
+import shutil
 
 cancer_ds = ds.load_breast_cancer()
 data = cancer_ds['data'][:, :20]
@@ -17,6 +19,12 @@ assert_scores = [
     [0.529758125364891, 0.470241874635109]
 ]
 
+
+test_root_folder = '/tmp/test_gam_serialization'
+
+def teardown():
+    if os.path.exists(test_root_folder):
+        shutil.rmtree(test_root_folder)
 
 def test_gam_training():
     gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42, balancer_seed=42)
