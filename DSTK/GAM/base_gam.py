@@ -29,6 +29,20 @@ class BaseGAM(object):
         return [sigmoid(-2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()])), \
                 sigmoid( 2 * np.sum([func.get_value(vec[self._get_index_for_feature(feat)]) for feat, func in self.shapes.iteritems()]))]
 
+    def _get_feature_value_pair_single_record(self, vec):
+        return sorted([(feat, func.get_value(vec[self._get_index_for_feature(feat)])) for feat, func in self.shapes.iteritems()], key=lambda x: x[1])
+
+    def feature_value_pairs(self, X):
+        if isinstance(X, pandas.core.frame.DataFrame):
+            data = X.as_matrix()
+        else:
+            data = X
+
+        if data.ndim == 1:
+            return self._get_feature_value_pair_single_record(data)
+        if data.ndim == 2:
+            return [self._get_feature_value_pair_single_record(vec) for vec in data]
+
     def score(self, X):
         if isinstance(X, pandas.core.frame.DataFrame):
             data = X.as_matrix()
