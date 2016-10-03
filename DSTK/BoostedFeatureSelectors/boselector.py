@@ -34,30 +34,28 @@ class Bolasso(BaseSelector):
 
     def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
         self.cv = kwargs.get('cv', None)
+        self.fit_intercept = kwargs.get('fit_intercept', True)
+        self.dual = kwargs.get('dual', False)
+        self.tol = kwargs.get('tol', 1e-4)
+        self.max_iter = kwargs.get('max_iter', 100)
+        self.class_weight = kwargs.get('class_weight', None)
+        self.n_jobs = kwargs.get('n_jobs', 1)
+        self.verbose = kwargs.get('verbose', 0)
+        self.intercept_scaling = kwargs.get('intercept_scaling', 1.0)
+        self.multi_class = kwargs.get('multi_class', 'ovr')
+        self.random_state = kwargs.get('random_state', None)
 
         # The following parameters are changed from default
         # since we want to induce sparsity in the final
         # feature set of Bolasso.
         # liblinear is needed to be working with 'L1' penalty.
-        if self.cv == False:
+        if not self.cv:
             self.C = kwargs.get('C', 10)
-            self.fit_intercept = kwargs.get('fit_intercept', True)
-            self.dual = kwargs.get('dual', False)
-            self.tol = kwargs.get('tol', 1e-4)
-            self.max_iter = kwargs.get('max_iter', 100)
-            self.class_weight = kwargs.get('class_weight', None)
-            self.n_jobs = kwargs.get('n_jobs', 1)
-            self.verbose = kwargs.get('verbose', 0)
-            self.intercept_scaling = kwargs.get('intercept_scaling', 1.0)
-            self.multi_class = kwargs.get('multi_class', 'ovr')
-            self.random_state = kwargs.get('random_state', None)
-
             self.logit = LogisticRegression(
                 C=self.C,
                 fit_intercept=self.fit_intercept,
                 dual=self.dual,
                 penalty='l1',
-                scoring=self.scoring,
                 solver='liblinear',
                 tol=self.tol,
                 max_iter=self.max_iter,
@@ -71,17 +69,8 @@ class Bolasso(BaseSelector):
             )
         else:
             self.Cs = kwargs.get('Cs', 10)
-            self.fit_intercept = kwargs.get('fit_intercept', True)
-            self.dual = kwargs.get('dual', False)
             self.scoring = kwargs.get('scoring', None)
-            self.tol = kwargs.get('tol', 1e-4)
-            self.max_iter = kwargs.get('max_iter', 100)
-            self.class_weight = kwargs.get('class_weight', None)
-            self.n_jobs = kwargs.get('n_jobs', 1)
-            self.verbose = kwargs.get('verbose', 0)
             self.refit = kwargs.get('refit', True)
-            self.intercept_scaling = kwargs.get('intercept_scaling', 1.0)
-            self.multi_class = kwargs.get('multi_class', 'ovr')
             self.random_state = kwargs.get('random_state', None)
 
             self.logit = LogisticRegressionCV(
@@ -102,7 +91,7 @@ class Bolasso(BaseSelector):
                 multi_class=self.multi_class,
                 random_state=self.random_state
             )
-        
+
         super(Bolasso, self).__init__(bootstrap_fraction, self.logit, random_seed=random_seed)
 
     def _get_feature_coeff(self):
