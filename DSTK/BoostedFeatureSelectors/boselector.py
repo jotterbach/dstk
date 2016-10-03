@@ -62,7 +62,6 @@ class Bolasso(BaseSelector):
                 class_weight=self.class_weight,
                 n_jobs=self.n_jobs,
                 verbose=self.verbose,
-                refit=self.refit,
                 intercept_scaling=self.intercept_scaling,
                 multi_class=self.multi_class,
                 random_state=self.random_state
