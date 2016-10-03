@@ -18,5 +18,4 @@ def plot_binner(binner, class_labels={0: '0', 1: '1'}):
     plt.legend(fontsize=16)
     plt.title(binner.name, size=16)
     plt.xlabel('bucket', size=18)
-    plt.ylabel('cond. proba.', size=18)
-    plt.tight_layout()
+    plt.ylabel('cond. proba.', size=18)ß
