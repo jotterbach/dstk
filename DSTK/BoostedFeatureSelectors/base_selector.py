@@ -81,7 +81,7 @@ class BaseSelector(object):
                                                                             random_seed=self.random_seed)
 
             self.clf.fit(boot_data, boot_labels)
-            boselector_metrics_dct = {attr + '__classifier_feature_coeff': coef for attr, coef in zip(self.attributes, self._get_feature_coeff())}
+            boselector_metrics_dct = {attr: coef for attr, coef in zip(self.attributes, self._get_feature_coeff())}
 
             if self.feature_importance_metric:
                 boselector_metrics_dct = self._calculate_feature_importance(oob_data, oob_labels)
@@ -125,7 +125,7 @@ class BaseSelector(object):
                           'num_occurence': (row != 0).sum(),
                           'frac_occurence': (row != 0).sum() / self.num_bootstraps})
 
-    def get_feature_stats(self, sort_key = 'frac_occurence'):
+    def get_feature_stats(self, sort_key='frac_occurence'):
         """
         Returns summary statistics like mean and number of occurences for the boosted-selected features
 
