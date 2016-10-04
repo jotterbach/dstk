@@ -21,7 +21,7 @@ from DSTK.FeatureBinning.TreeBasedFeatureBinning import _recurse_tree
 
 def _flatten_tree(tree):
     list_of_buckets = list()
-    _recurse_tree(tree, list_of_buckets, mdlp=True)
+    _recurse_tree(tree, list_of_buckets, mdlp=False)
     lower_bounds = np.asarray([tup[0][0] for tup in list_of_buckets], dtype=np.float64, order='C')
     upper_bounds = np.asarray([tup[0][1] for tup in list_of_buckets], dtype=np.float64, order='C')
     bucket_values = np.asarray([tup[1][0] for tup in list_of_buckets], dtype=np.float64, order='C')
