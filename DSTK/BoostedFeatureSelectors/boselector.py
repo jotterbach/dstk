@@ -1,6 +1,6 @@
 from __future__ import division
 
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from base_selector import BaseSelector
@@ -76,6 +76,79 @@ class Bolasso(BaseSelector):
 
     def _get_feature_coeff(self):
         return self.logit.coef_.flatten().tolist()
+
+
+class SGDBolasso(BaseSelector):
+    """Bolasso feature selection technique, based on the article
+
+    `F. R. Bach, Bolasso: model consistent Lasso estimation through the bootstrap, ICML '08`
+
+    This feature selection wrapper trains a `num_bootstrap` sklearn SGDClassifier classifiers with L1-penalty
+    on a bootstrapped subset of the data with size `bootstrap_fraction`. It will store an internal Dataframe with the
+    raw coefficients of the trained classifiers and exposes a method to get some summary statistics of the full Bolasso
+    DF.
+
+    Parameters
+    ----------
+    bootstrap_fraction: Fraction of the data that will be bootstrap sampled with replacement.
+
+    random_seed: Fix the seed for the bootstrap generator
+
+    kwargs: All the arguments that the sklearn SGDClassifier takes.
+
+    Attributes
+    ----------
+    sgd_logit: The initialized SGDClassifier classifier
+
+    coeff_df: The internal DataFrame holding all the individual coefficients
+
+    """
+
+    def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
+
+        self.alpha = kwargs.get("alpha", 0.0001)
+        self.l1_ratio = kwargs.get("l1_ratio", 0.15)
+        self.fit_intercept = kwargs.get("fit_intercept", True)
+        self.n_iter = kwargs.get("n_iter", 5)
+        self.shuffle = kwargs.get("shuffle", True)
+        self.verbose = kwargs.get("verbose", 0)
+        self.epsilon = kwargs.get("epsilon", 0.1)
+        self.n_jobs = kwargs.get("n_jobs", 1)
+        self.random_state = kwargs.get("random_state", None)
+        self.learning_rate = kwargs.get("learning_rate", "optimal")
+        self.eta0 = kwargs.get("eta0", 0.0)
+        self.power_t = kwargs.get("power_t", 0.5)
+        self.class_weight = kwargs.get("class_weight", None)
+        self.warm_start = kwargs.get("warm_start", False)
+        self.average = kwargs.get("average", False)
+
+        # The following parameters are changed from default
+        # since we want to induce sparsity in the final
+        # feature set of Bolasso.
+        self.sgd_logit = SGDClassifier(
+            loss="log",
+            penalty='l1',
+            alpha=self.alpha,
+            l1_ratio=self.l1_ratio,
+            fit_intercept=self.fit_intercept,
+            n_iter=self.n_iter,
+            shuffle=self.shuffle,
+            verbose=self.verbose,
+            epsilon=self.epsilon,
+            n_jobs=self.n_jobs,
+            random_state=self.random_state,
+            learning_rate=self.learning_rate,
+            eta0=self.eta0,
+            power_t=self.power_t,
+            class_weight=self.class_weight,
+            warm_start=self.warm_start,
+            average=self.average
+        )
+
+        super(SGDBolasso, self).__init__(bootstrap_fraction, self.sgd_logit, random_seed=random_seed)
+
+    def _get_feature_coeff(self):
+        return self.sgd_logit.coef_.flatten().tolist()
 
 
 class Botree(BaseSelector):
