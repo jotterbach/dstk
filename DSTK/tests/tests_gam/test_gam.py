@@ -103,6 +103,8 @@ def test_feature_ranking():
     gam = GAM(max_depth=3, max_leaf_nodes=5, random_state=42, balancer_seed=42)
     gam.train(data[:, :3], labels, n_iter=5, learning_rate=0.0025, num_bags=1, num_workers=3)
 
+    print gam.feature_value_pairs(data[:2, :3])
+
     assert gam.feature_value_pairs(data[:2, :3]) == \
-        [[('feature_2', -0.01203629528482458), ('feature_0', -0.011723317678495992), ('feature_1', -0.004096224819452929)],
-         [('feature_2', -0.01203629528482458), ('feature_0', -0.011723317678495992), ('feature_1', 0.0085166757804256213)]]
+        [[('feature_2', -0.012036295284824585), ('feature_0', -0.011723317678495999), ('feature_1', -0.004096224819452929)],
+         [('feature_2', -0.012036295284824585), ('feature_0', -0.011723317678495999), ('feature_1', 0.0085166757804256248)]]

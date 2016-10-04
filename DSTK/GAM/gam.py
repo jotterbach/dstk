@@ -16,6 +16,16 @@ from DSTK.GAM.utils.p_splines import PSpline
 from DSTK.GAM.utils.shape_function import ShapeFunction
 from DSTK.utils.function_helpers import sigmoid
 from DSTK.GAM.base_gam import BaseGAM
+from DSTK.FeatureBinning.TreeBasedFeatureBinning import _recurse_tree
+
+
+def _flatten_tree(tree):
+    list_of_buckets = list()
+    _recurse_tree(tree, list_of_buckets, mdlp=True)
+    lower_bounds = np.asarray([tup[0][0] for tup in list_of_buckets], dtype=np.float64, order='C')
+    upper_bounds = np.asarray([tup[0][1] for tup in list_of_buckets], dtype=np.float64, order='C')
+    bucket_values = np.asarray([tup[1][0] for tup in list_of_buckets], dtype=np.float64, order='C')
+    return lower_bounds, upper_bounds, bucket_values
 
 
 def _recurse(tree, feature_vec):
@@ -54,39 +64,29 @@ def _recurse(tree, feature_vec):
     return leaf_node_id, lower, upper
 
 
-def _get_sum_of_gamma_correction(tree, data, labels, class_weights, feature_name):
+def _get_grouped_pseudo_responses(data, labels, upper_bounds):
+    node_ids = np.digitize(data, upper_bounds, right=True)
+    n_groups = np.unique(node_ids)
 
-    num_of_samples = {}
-    sum_of_labels = {}
-    weighted_sum_of_labels = {}
-    set_of_boundaries = set()
+    return n_groups, np.asarray([labels[np.where(node_ids == idx)[0]] for idx in n_groups])
 
-    for vec, label, weight in zip(data, labels, class_weights):
-        node_id, lower, upper = _recurse(tree, vec)
 
-        if node_id in sum_of_labels.keys():
-            num_of_samples[node_id] += 1
-            sum_of_labels[node_id] += weight * label
-            weighted_sum_of_labels[node_id] += weight * np.abs(label) * (2 - np.abs(label))
-        else:
-            num_of_samples[node_id] = 1
-            sum_of_labels[node_id] = weight * label
-            weighted_sum_of_labels[node_id] = weight * np.abs(label) * (2 - np.abs(label))
+def _get_sum_of_gamma_correction(tree, data, labels, feature_name):
 
-        set_of_boundaries.add((node_id, lower, upper))
+    lower_bounds, upper_bounds, bucket_values = _flatten_tree(tree)
+    nodes, grouped_labels = _get_grouped_pseudo_responses(data, labels, upper_bounds)
 
-    lst_of_sorted_boundaries = sorted(set_of_boundaries, key=lambda x: x[1])
-    split_values = [tup[2] for tup in lst_of_sorted_boundaries]
-    node_keys = [tup[0] for tup in lst_of_sorted_boundaries]
-    values = [(sum_of_labels[key]) / float(weighted_sum_of_labels[key]) for key in node_keys]
+    sum_of_labels = np.asarray([grouped_labels[idx].sum() for idx in nodes])
+    weighted_sum_of_labels = np.asarray([np.sum(np.abs(grouped_labels[idx]) * (2 - np.abs(grouped_labels[idx]))) for idx in nodes])
+    values = sum_of_labels / weighted_sum_of_labels
 
     if not np.isfinite(values).any():
         raise ArithmeticError("Encountered NaN or Infinity. Aborting training")
 
-    return ShapeFunction(split_values, values, feature_name)
+    return ShapeFunction(upper_bounds, values, feature_name)
 
 
-def _get_shape_for_attribute(attribute_data, labels, class_weights, feature_name, criterion, splitter,
+def _get_shape_for_attribute(attribute_data, labels, feature_name, criterion, splitter,
                              max_depth, min_samples_split, min_samples_leaf, min_weight_fraction_leaf,
                              max_features, random_state, max_leaf_nodes, presort):
 
@@ -102,7 +102,7 @@ def _get_shape_for_attribute(attribute_data, labels, class_weights, feature_name
                                 presort=presort)
 
     dtr.fit(attribute_data.reshape(-1, 1), labels)
-    return feature_name, _get_sum_of_gamma_correction(dtr.tree_, attribute_data, labels, class_weights, feature_name)
+    return feature_name, _get_sum_of_gamma_correction(dtr.tree_, attribute_data, labels, feature_name)
 
 
 class GAM(BaseGAM):
@@ -137,7 +137,7 @@ class GAM(BaseGAM):
         self.balancer_seed = kwargs.get('balancer_seed', None)
         self.influence_trimming_threshold = kwargs.get('influence_trimming_threshold', None)
 
-        _allowed_balancers = ['global_upsample', 'global_downsample', 'boosted_upsample', 'boosted_downsample', 'class_weights']
+        _allowed_balancers = ['global_upsample', 'global_downsample', 'boosted_upsample', 'boosted_downsample']
 
         if not self.balancer is None:
             if not self.balancer in _allowed_balancers:
@@ -301,7 +301,6 @@ class GAM(BaseGAM):
                 x_train, y_train = sh.upsample_minority_class(x_train, y_train, random_seed=self.balancer_seed)
             elif self.balancer == 'boosted_downsample':
                 x_train, y_train = sh.downsample_majority_class(x_train, y_train, random_seed=self.balancer_seed)
-            class_weights = self._get_class_weights(y_train)
             responses = self._get_pseudo_responses(x_train, y_train)
 
             if self.influence_trimming_threshold:
@@ -313,7 +312,6 @@ class GAM(BaseGAM):
                 lst_of_futures = [executors.submit(_get_shape_for_attribute,
                                                    x_train[:, self._get_index_for_feature(name)],
                                                    responses,
-                                                   class_weights,
                                                    name,
                                                    self.criterion,
                                                    self.splitter,
