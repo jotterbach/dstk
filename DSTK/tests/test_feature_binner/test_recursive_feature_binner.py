@@ -1,6 +1,6 @@
 import sklearn.datasets as ds
 import numpy as np
-from DSTK.FeatureBinning import TreeBasedFeatureBinning as tfb
+from DSTK.FeatureBinning import binners as tfb
 
 cancer_ds = ds.load_breast_cancer()
 data = cancer_ds['data']
