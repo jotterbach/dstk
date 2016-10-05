@@ -1,6 +1,6 @@
 import sklearn.datasets as ds
 import numpy as np
-from DSTK.FeatureBinning import TreeBasedFeatureBinning as tfb
+from DSTK.FeatureBinning import binners as tfb
 
 cancer_ds = ds.load_breast_cancer()
 data = cancer_ds['data']
@@ -21,7 +21,7 @@ def test_recursion():
          ((13.094999313354492, 15.045000076293945), [0.2878787878787879, 0.7121212121212122]),
          ((15.045000076293945, 16.924999237060547), [0.8148148148148148, 0.18518518518518517]),
          ((16.924999237060547, np.PINF), [0.9915254237288136, 0.00847457627118644]),
-         (np.NaN, [0.5, 0.5])]
+         (np.NaN, [0.37258347978910367, 0.62741652021089633])]
 
 
 def test_recursion_with_mdlp():
@@ -39,7 +39,7 @@ def test_recursion_with_mdlp():
         ((13.094999313354492, 15.045000076293945), [0.2878787878787879, 0.7121212121212122]),
         ((15.045000076293945, 17.880001068115234), [0.8533333333333334, 0.14666666666666667]),
         ((17.880001068115234, np.PINF), [1.0, 0.0]),
-        (np.NaN, [0.5, 0.5])]
+        (np.NaN, [0.37258347978910367, 0.62741652021089633])]
 
 
 def test_fit():

@@ -89,6 +89,7 @@ def _get_variables_for_entropy_calculation(tree, node_id):
 
     return full_set_without_zero_counts, full_set_tree_classes, left_set_without_zero_counts, left_set_tree_classes, right_set_without_zero_counts, right_set_tree_classes
 
+
 class TreeBasedFeatureBinning(object):
 
     def __init__(self, name, **kwargs):
@@ -160,12 +161,14 @@ class TreeBasedFeatureBinning(object):
 
         assert (values is not None) & (values != []), "feature_values cannot be None or empty"
         assert (target is not None) & (target != []), "target_values cannot be None or empty"
-        assert len(values) == len(values), "feature_values and target_values must have same length"
+        assert len(values) == len(target), "feature_values and target_values must have same length"
 
         non_nan_feats, non_nan_labels = TreeBasedFeatureBinning._preprocess_values_and_targets(values, target)
 
         if non_nan_feats.size > 0:
             self.dtc.fit(non_nan_feats, non_nan_labels)
+
+            prior = np.asarray(non_nan_labels).mean()
 
             # Handle case of pure classes after nan treatment explicitly
             # To this end we check if we have a binary classification problem, and if so
@@ -183,8 +186,9 @@ class TreeBasedFeatureBinning(object):
         # handle case of purely nan feature values
         else:
             self.cond_proba_buckets = []
+            prior = None
 
-        self.cond_proba_buckets.append((np.nan, TreeBasedFeatureBinning._process_nan_values(values, target)))
+        self.cond_proba_buckets.append((np.nan, TreeBasedFeatureBinning._process_nan_values(values, target, prior)))
         self.is_fit = True
         return self
 
@@ -313,14 +317,69 @@ class TreeBasedFeatureBinning(object):
         return feats[~np.isnan(feats)].reshape(-1, 1), labels[~np.isnan(feats)].reshape(-1, 1)
 
     @staticmethod
-    def _process_nan_values(values, target):
+    def _process_nan_values(values, target, prior):
         feats = np.array(values)
         labels = np.array(target)
         num_classes = np.bincount(target).size
 
         num_nan = len(feats[np.isnan(feats)])
         val_count = np.bincount(labels[np.isnan(feats)], minlength=num_classes)
-        if num_nan == 0:
+        if (num_nan == 0) and prior:
+            return [1-prior, prior]
+        elif (num_nan == 0) and (prior is None):
             return (np.ones((num_classes,), dtype='float64') / num_classes).tolist()
         return list(val_count / num_nan)
 
+
+class CategoricalNaiveBayesBinner(object):
+
+    def __init__(self, name):
+        self.name = name
+        self.categories = list()
+        self._count_buckets = list()
+        self.cond_proba_buckets = list()
+        self.is_fit = False
+
+    def fit(self, categories, targets):
+
+        assert (categories is not None) & (targets != []), "feature_values cannot be None or empty"
+        assert (categories is not None) & (targets != []), "target_values cannot be None or empty"
+        assert len(categories) == len(targets), "feature_values and target_values must have same length"
+
+        categories = np.asarray(categories, dtype='str')
+
+        self.categories = np.unique(categories).tolist()
+
+        cat_to_idx_dct = {cat: np.where(cat == categories)[0] for cat in self.categories}
+
+        for cat, grp_idx in cat_to_idx_dct.iteritems():
+            mean = targets[grp_idx].mean()
+            pos_count = targets[grp_idx].sum()
+            neg_count = targets[grp_idx].size - pos_count
+            self._count_buckets.append((cat, [neg_count, pos_count]))
+            self.cond_proba_buckets.append((cat, [1-mean, mean]))
+
+        self._count_buckets.append(('N/A', [targets.size - targets.sum(), targets.sum()]))
+        self.cond_proba_buckets.append(('N/A', [1 - targets.mean(), targets.mean()]))
+        self.cond_proba_buckets = sorted(self.cond_proba_buckets, key=lambda x: x[0])
+        self.is_fit = True
+        return self
+
+    def transform(self, feature_values, class_index=1):
+        assert self.is_fit, "FeatureBinner has to be fit to the data first"
+
+        return [self._get_probability_for_value_in_category_and_class(val, class_index) for val in feature_values]
+
+    def fit_transform(self, feature_values, target_values, class_index=1):
+        self.fit(feature_values, target_values)
+        return self.transform(feature_values, class_index=class_index)
+
+    def _get_probability_for_value_in_category_and_class(self, cat, class_index):
+        if cat in self.categories:
+            for cond_cat, proba in self.cond_proba_buckets:
+                if cat == cond_cat:
+                    return proba[class_index]
+        else:
+            for cond_cat, proba in self.cond_proba_buckets:
+                if cond_cat == 'N/A':
+                    return proba[class_index]
