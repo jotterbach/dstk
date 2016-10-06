@@ -32,7 +32,7 @@ class Bolasso(BaseSelector):
 
     """
 
-    def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
+    def __init__(self, bootstrap_fraction, random_seed=None, feature_importance_metric=None, feature_importance_threshold=None, **kwargs):
 
         self.Cs = kwargs.get('Cs', 10)
         self.fit_intercept = kwargs.get('fit_intercept', True)
@@ -72,7 +72,7 @@ class Bolasso(BaseSelector):
             random_state=self.random_state
         )
 
-        super(Bolasso, self).__init__(bootstrap_fraction, self.logit, random_seed=random_seed)
+        super(Bolasso, self).__init__(bootstrap_fraction, self.logit, random_seed=random_seed, feature_importance_metric=feature_importance_metric, feature_importance_threshold=feature_importance_threshold)
 
     def _get_feature_coeff(self):
         return self.logit.coef_.flatten().tolist()
@@ -104,7 +104,7 @@ class SGDBolasso(BaseSelector):
 
     """
 
-    def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
+    def __init__(self, bootstrap_fraction, random_seed=None, feature_importance_metric=None, feature_importance_threshold=None, **kwargs):
 
         self.alpha = kwargs.get("alpha", 0.0001)
         self.l1_ratio = kwargs.get("l1_ratio", 0.15)
@@ -145,7 +145,7 @@ class SGDBolasso(BaseSelector):
             average=self.average
         )
 
-        super(SGDBolasso, self).__init__(bootstrap_fraction, self.sgd_logit, random_seed=random_seed)
+        super(SGDBolasso, self).__init__(bootstrap_fraction, self.sgd_logit, random_seed=random_seed, feature_importance_metric=feature_importance_metric, feature_importance_threshold=feature_importance_threshold)
 
     def _get_feature_coeff(self):
         return self.sgd_logit.coef_.flatten().tolist()
@@ -237,7 +237,7 @@ class Boforest(BaseSelector):
 
        """
 
-    def __init__(self, bootstrap_fraction, random_seed=None, **kwargs):
+    def __init__(self, bootstrap_fraction, random_seed=None, feature_importance_metric=None, feature_importance_threshold=None, **kwargs):
         self.n_estimators = kwargs.get('n_estimators', 10)
         self.criterion = kwargs.get('criterion', "gini")
         self.max_depth = kwargs.get('max_depth', None)
@@ -272,7 +272,7 @@ class Boforest(BaseSelector):
             self.class_weight
         )
 
-        super(Boforest, self).__init__(bootstrap_fraction, self.rfc, random_seed=random_seed)
+        super(Boforest, self).__init__(bootstrap_fraction, self.rfc, random_seed=random_seed, feature_importance_metric=feature_importance_metric, feature_importance_threshold=feature_importance_threshold)
 
     def _get_feature_coeff(self):
         return self.rfc.feature_importances_.flatten().tolist()
