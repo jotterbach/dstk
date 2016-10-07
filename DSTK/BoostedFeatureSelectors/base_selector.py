@@ -48,7 +48,7 @@ class BaseSelector(object):
 
     def _init_boselector_df(self, data, labels):
         self.attributes = data.columns
-        self.coeff_df = pd.DataFrame()
+        self.coeff_df = pd.DataFrame(columns=self.attributes)
 
         self.initialized = True
 
