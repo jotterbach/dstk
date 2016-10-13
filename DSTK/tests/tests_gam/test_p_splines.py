@@ -63,17 +63,6 @@ def test_flatten_basis_matrix_for_regression():
     np.testing.assert_array_equal(base_set, manual_concat)
 
 
-def test_p_spline_fitting():
-    spline_fitter = psgam.PSplineGAM()
-
-    spline_fitter.train(data, target)
-
-    np.testing.assert_array_almost_equal(
-        spline_fitter.predict(data[:10, :]),
-        [0.3802, 0.0779, 0.2968, 0.2203, 0.6047, 0.1293, 0.3326, 0.248, 0.1509, 0.1438],
-        4)
-
-
 def test_p_spline_fitting_with_dataframe():
     spline_fitter = psgam.PSplineGAM()
 
