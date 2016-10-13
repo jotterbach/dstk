@@ -1,7 +1,7 @@
 DSTK: The Data Science Toolkit
 ==============================
 
-Build status: Travis: [![Build Status](https://travis-ci.org/jotterbach/dstk.svg?branch=master)](https://travis-ci.org/jotterbach/dstk)
+Build status: Travis: [Build Status](https://travis-ci.org/jotterbach/dstk.svg?branch=master)](https://travis-ci.org/jotterbach/dstk)
 
 This repository contains advanced tools for Data Scientists to use them as off-the-shelf solution.
 Feel free to use and contribute.
