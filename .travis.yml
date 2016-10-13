@@ -4,7 +4,7 @@ python:
 # command to install dependencies
 install:
   - pip install -U pip
-  - pip install --only-binary=numpy,scipy,statsmodels numpy scipy statsmodels
+  - pip install --only-binary=numpy,scipy numpy scipy
   - pip install -r requirements.txt
 # command to run tests
 script: tox --sitepackages
