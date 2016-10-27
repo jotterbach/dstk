@@ -3,7 +3,6 @@ import sklearn
 from sklearn.tree import DecisionTreeClassifier
 import numpy as np
 import scipy.stats as st
-from DSTK.GAM.gam import ShapeFunction
 
 
 def _recurse_tree(tree, lst, mdlp, node_id=0, depth=0, min_val=np.NINF, max_val=np.PINF):
