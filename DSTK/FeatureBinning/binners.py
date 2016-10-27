@@ -407,7 +407,7 @@ class ConditionalInferenceBinner(object):
     The method is based on:
         T. Horton, K. Hornik, A. Zeileis, "Unbiased Recursive Partitioning: A Conditional Inference Framework"
         Journal of Computational and Graphical Statistics 15, 651-674 (2006)
-        http://www-tandfonline-com.ezp-prod1.hul.harvard.edu/doi/abs/10.1198/106186006X133933
+        http://www.tandfonline.com/doi/abs/10.1198/106186006X133933
 
     The basic idea is to leverage PearsonR correlation coefficient to find the best split (by maximizing the absolute value of the correlation
     and terminate the regression based on accepting the Null-Hypothesis of the PearsonR coefficient under a permutation test.
