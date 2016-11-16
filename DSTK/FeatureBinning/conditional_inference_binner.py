@@ -69,7 +69,6 @@ class ConditionalInferenceBinner(BaseBinner):
         self._splits = [np.PINF]
         self._values = list()
         self.nodes = list()
-        self.cond_proba_buckets = list()
 
         self._is_fit = False
 
