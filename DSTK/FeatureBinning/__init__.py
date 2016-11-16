@@ -1,0 +1,3 @@
+from DSTK.FeatureBinning.categorical_binner import CategoricalNaiveBayesBinner
+from DSTK.FeatureBinning.conditional_inference_binner import ConditionalInferenceBinner
+from DSTK.FeatureBinning.decision_tree_binner import DecisionTreeBinner
