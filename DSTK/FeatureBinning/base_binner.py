@@ -51,7 +51,7 @@ class BaseBinner(object):
         else:
             return np.asarray(self.values)[idx]
 
-    def fit_transform(self, feature_values, target_values, class_index=1):
+    def fit_transform(self, feature_values, target_values, **kwargs):
         """
         :param feature_values: list or array of the feature values
         :param target_values: list or array of the corresponding labels
@@ -61,7 +61,7 @@ class BaseBinner(object):
                  for a given example with value x in bin with range X to have label T and list of conditional probabilities for each value to be of class T
         """
         self.fit(feature_values, target_values)
-        return self.transform(feature_values, class_index=class_index)
+        return self.transform(feature_values, **kwargs)
 
     def add_bin(self, right_bin_edge, bin_value):
 
