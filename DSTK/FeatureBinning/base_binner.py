@@ -44,7 +44,7 @@ class BaseBinner(object):
         if not self.is_fit:
             raise AssertionError("FeatureBinner has to be fit to the data first.")
 
-        class_index = kwargs.get('class_index', None)
+        class_index = kwargs.get('class_index', 1)
         idx = np.digitize(values, self.splits, right=True)
         if class_index:
             return np.asarray(self.values)[idx][:, class_index]
