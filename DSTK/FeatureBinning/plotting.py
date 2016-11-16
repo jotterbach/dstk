@@ -11,7 +11,8 @@ def _plot_bucket_values(binner, title=None, class_labels={0: '0', 1: '1'}):
     class_1 = [val[1] for val in binner.values]
     sp = np.asarray(binner.splits)
     non_na = sp[~np.isnan(sp)]
-    label = [str(tup).replace(')', ']') for tup in zip(non_na[:-1], non_na[1:])]  + ['nan']
+    non_na = np.insert(non_na, 0, np.NINF)
+    label = ['({0:6.2f}, {1:6.2f}]'.format(tup[0], tup[1]) for tup in zip(non_na[:-1], non_na[1:])] + ['nan']
     ind = np.arange(len(class_0))
     w = 0.5
     plt.bar(ind, class_0, w, label=class_labels[0])
