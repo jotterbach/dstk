@@ -69,7 +69,10 @@ class BaseBinner(object):
             warnings.warn("Bin edge already exists.", UserWarning)
             return self
 
-        idx = np.digitize(right_bin_edge, self.splits, right=True)
+        # use np.searchsorted instead of digitize as the latter
+        # gives the wrong result for purely non-numeric splits
+        # see corresponding test for the issue
+        idx = np.searchsorted(self.splits, right_bin_edge, side='right')
         self.splits = np.insert(self.splits, idx, right_bin_edge).tolist()
         self.values = np.insert(self.values, [idx], bin_value, axis=0).tolist()
 
