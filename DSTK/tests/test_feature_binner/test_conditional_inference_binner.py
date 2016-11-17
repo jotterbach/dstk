@@ -63,6 +63,17 @@ def test_adding_bin():
                              [0.37258347978910367, 0.62741652021089633]])
 
 
+def test_adding_bin_with_non_numeric_splits_only():
+    cib = ConditionalInferenceBinner('test', alpha=0.05)
+    cib.splits = [np.PINF, np.NaN]
+    cib.values = [[0.1, 0.9], [0.8, 0.2]]
+    cib.is_fit = True
+
+    cib.add_bin(-1.0, [0.3, 0.7])
+    np.testing.assert_equal(cib.splits, [-1.0, np.PINF, np.NaN])
+    np.testing.assert_equal(cib.values, [[0.3, 0.7], [0.1, 0.9], [0.8, 0.2]])
+
+
 def test_recursion_with_nan():
     col = 'mean area'
     data = cancer_df[col].values
