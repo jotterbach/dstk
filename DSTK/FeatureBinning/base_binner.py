@@ -45,7 +45,12 @@ class BaseBinner(object):
             raise AssertionError("FeatureBinner has to be fit to the data first.")
 
         class_index = kwargs.get('class_index', 1)
-        idx = np.digitize(values, self.splits, right=True)
+        idx = np.searchsorted(self.splits, values, side='right')
+
+        # searchsorted on nan values gives wrong idx when input is nan
+        # as it assumes the nan value is "right" of a nan split
+        idx[np.isnan(values)] -= 1
+
         if class_index:
             return np.asarray(self.values)[idx][:, class_index]
         else:
