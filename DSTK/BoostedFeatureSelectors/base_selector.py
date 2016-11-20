@@ -54,13 +54,14 @@ class BaseSelector(object):
 
         return data.as_matrix(), labels.values
 
-    def fit(self, data, labels, epochs=10):
+    def fit(self, data, labels, epochs=10, verbose=1):
         """
         Fits the boosted selector
 
         :param data: Pandas DataFrame containing all the data
         :param labels: Pandas Series with the labels
         :param epochs: Number of fitting iterations. Defaults to 10.
+        :param verbose: print progress bar
         :return: None
         """
 
@@ -89,10 +90,12 @@ class BaseSelector(object):
             self.coeff_df = self.coeff_df.append(pd.Series(boselector_metrics_dct), ignore_index=True)
             self.num_bootstraps += 1
 
-            sys.stdout.write("\r>> Iteration: {0:0d}/{1:0d}, elapsed time:{2:4.1f} s".format(m+1, epochs, time.time()-start))
+            if verbose == 1:
+                sys.stdout.write("\r>> Iteration: {0:0d}/{1:0d}, elapsed time:{2:4.1f} s".format(m+1, epochs, time.time()-start))
+                sys.stdout.flush()
+        if verbose == 1:
+            sys.stdout.write('\n')
             sys.stdout.flush()
-        sys.stdout.write('\n')
-        sys.stdout.flush()
 
     def _calculate_feature_importance(self, oob_data, oob_labels):
 
