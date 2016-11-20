@@ -4,6 +4,10 @@ from sklearn.linear_model import LogisticRegressionCV, SGDClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from base_selector import BaseSelector
+from sklearn.base import BaseEstimator
+from sklearn.metrics import accuracy_score, make_scorer
+from sklearn.model_selection import GridSearchCV
+import numpy as np
 
 
 class Bolasso(BaseSelector):
@@ -78,7 +82,7 @@ class Bolasso(BaseSelector):
         return self.logit.coef_.flatten().tolist()
 
 
-class SGDBolasso(BaseSelector):
+class SGDBolasso(BaseSelector, BaseEstimator):
     """Bolasso feature selection technique, based on the article
 
     `F. R. Bach, Bolasso: model consistent Lasso estimation through the bootstrap, ICML '08`
@@ -104,23 +108,40 @@ class SGDBolasso(BaseSelector):
 
     """
 
-    def __init__(self, bootstrap_fraction, random_seed=None, feature_importance_metric=None, feature_importance_threshold=None, **kwargs):
+    def __init__(self,
+                 bootstrap_fraction,
+                 random_seed=None,
+                 feature_importance_metric=None,
+                 feature_importance_threshold=None,
+                 alpha=0.0001,
+                 fit_intercept=True,
+                 n_iter=5,
+                 shuffle=True,
+                 verbose=0,
+                 epsilon=0.1,
+                 n_jobs=1,
+                 random_state=None,
+                 learning_rate="optimal",
+                 eta0=0.0,
+                 power_t=0.5,
+                 class_weight=None,
+                 warm_start=False,
+                 average=False):
 
-        self.alpha = kwargs.get("alpha", 0.0001)
-        self.l1_ratio = kwargs.get("l1_ratio", 0.15)
-        self.fit_intercept = kwargs.get("fit_intercept", True)
-        self.n_iter = kwargs.get("n_iter", 5)
-        self.shuffle = kwargs.get("shuffle", True)
-        self.verbose = kwargs.get("verbose", 0)
-        self.epsilon = kwargs.get("epsilon", 0.1)
-        self.n_jobs = kwargs.get("n_jobs", 1)
-        self.random_state = kwargs.get("random_state", None)
-        self.learning_rate = kwargs.get("learning_rate", "optimal")
-        self.eta0 = kwargs.get("eta0", 0.0)
-        self.power_t = kwargs.get("power_t", 0.5)
-        self.class_weight = kwargs.get("class_weight", None)
-        self.warm_start = kwargs.get("warm_start", False)
-        self.average = kwargs.get("average", False)
+        self.alpha = alpha
+        self.fit_intercept = fit_intercept
+        self.n_iter = n_iter
+        self.shuffle = shuffle
+        self.verbose = verbose
+        self.epsilon = epsilon
+        self.n_jobs = n_jobs
+        self.random_state = random_state
+        self.learning_rate = learning_rate
+        self.eta0 = eta0
+        self.power_t = power_t
+        self.class_weight = class_weight
+        self.warm_start = warm_start
+        self.average = average
 
         # The following parameters are changed from default
         # since we want to induce sparsity in the final
@@ -129,7 +150,7 @@ class SGDBolasso(BaseSelector):
             loss="log",
             penalty='l1',
             alpha=self.alpha,
-            l1_ratio=self.l1_ratio,
+            l1_ratio=1.0,
             fit_intercept=self.fit_intercept,
             n_iter=self.n_iter,
             shuffle=self.shuffle,
@@ -149,6 +170,48 @@ class SGDBolasso(BaseSelector):
 
     def _get_feature_coeff(self):
         return self.sgd_logit.coef_.flatten().tolist()
+
+    def predict_proba(self, data):
+        return self.sgd_logit.predict_proba(data)
+
+    def predict(self, data):
+        return np.round(self.sgd_logit.predict_proba(data)[:, 1])
+
+    def fit_cv(self, data, labels, cv_params, epochs=10, **kwargs):
+
+        n_jobs = kwargs.get('n_jobs', 1)
+        iid = kwargs.get('iid', True)
+        refit = kwargs.get('refit', True)
+        cv = kwargs.get('cv', None)
+        verbose = kwargs.get('verbose', 0)
+        pre_dispatch = kwargs.get('pre_dispatch', '2*n_jobs')
+        error_score = kwargs.get('error_score', 'raise')
+        return_train_score = kwargs.get('return_train_score', True)
+
+        param_dct = self.get_params()
+        param_dct.update({'bootstrap_fraction': 1.0})
+
+        rscv = GridSearchCV(SGDBolasso(**param_dct),
+                            scoring=make_scorer(accuracy_score),
+                            verbose=verbose,
+                            param_grid=cv_params,
+                            fit_params={'epochs': 1, 'verbose': 0},
+                            cv=cv,
+                            return_train_score=return_train_score,
+                            n_jobs=n_jobs,
+                            iid=iid,
+                            refit=refit,
+                            pre_dispatch=pre_dispatch,
+                            error_score=error_score)
+
+        rscv.fit(data, labels)
+
+        param_dct = rscv.best_params_.copy()
+        param_dct.update({'bootstrap_fraction': self.bootstrap_fraction})
+        best_estim = SGDBolasso(**param_dct)
+
+        best_estim.fit(data, labels, epochs=epochs)
+        return best_estim, rscv
 
 
 class Botree(BaseSelector):
@@ -247,7 +310,7 @@ class Boforest(BaseSelector):
         self.max_features = kwargs.get('max_features', "auto")
         self.max_leaf_nodes = kwargs.get('max_leaf_nodes', None)
         self.bootstrap = kwargs.get('bootstrap', True)
-        self.oob_score = kwargs.get('oob_score', False)
+        self.oob_score = kwargs.get('oob_score', True)
         self.n_jobs = kwargs.get('n_jobs', 1)
         self.random_state = kwargs.get('random_state', None)
         self.verbose = kwargs.get('verbose', 0)
