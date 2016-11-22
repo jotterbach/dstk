@@ -91,3 +91,26 @@ def test_recursion_with_nan():
                              [0.83333333333333337, 0.16666666666666666],
                              [0.99145299145299148, 0.0085470085470085479],
                              [0.2608695652173913, 0.73913043478260865]])
+
+
+def test_recursion_with_nan_and_special_value():
+    col = 'mean area'
+    data = cancer_df[col].values
+    rand_idx = np.linspace(1, 500, 23).astype(int)
+    data[rand_idx] = np.NaN
+
+    rand_idx_2 = np.linspace(1, 550, 29).astype(int)
+    data[rand_idx_2] = -1.0
+
+    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.05, special_values=[-1.0, np.NaN])
+    cib.fit(data, cancer_target)
+
+    np.testing.assert_equal(cib.splits, [-1.0, 471.29998779296875, 572.2999877929688, 693.7000122070312, 819.7999877929688, np.PINF, np.NaN])
+    np.testing.assert_equal(cib.values,
+                            [[0.4827586206896552, 0.5172413793103449],
+                             [0.032432432432432434, 0.9675675675675676],
+                             [0.14432989690721648, 0.8556701030927835],
+                             [0.3132530120481928, 0.6867469879518072],
+                             [0.8205128205128205, 0.1794871794871795],
+                             [1.0, 0.0],
+                             [0.23809523809523808, 0.7619047619047619]])

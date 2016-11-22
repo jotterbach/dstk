@@ -2,7 +2,7 @@ from __future__ import division
 import numpy as np
 import scipy.stats as st
 from DSTK.FeatureBinning.base_binner import BaseBinner
-from DSTK.FeatureBinning._utils import _preprocess_values_and_targets, _process_nan_values
+from DSTK.FeatureBinning._utils import _naive_bayes_bins, _filter_special_values
 
 
 class _Node(object):
@@ -63,6 +63,7 @@ class ConditionalInferenceBinner(BaseBinner):
         self.alpha = kwargs.get('alpha', 0.05)
         self.min_samples_split = kwargs.get('min_samples_split', 2)
         self.min_samples_leaf = kwargs.get('min_samples_leaf', 2)
+        self.special_values = kwargs.get('special_values', [np.NaN])
 
         self.num_classes = None
 
@@ -94,21 +95,19 @@ class ConditionalInferenceBinner(BaseBinner):
         if self.num_classes == 1:
             raise ArithmeticError("data contains only one label.")
 
-        non_nan_feats, non_nan_labels = _preprocess_values_and_targets(values, targets)
+        special_vals_idx = _filter_special_values(values, self.special_values)
+        non_special_vals, non_special_labels = values[special_vals_idx['regular']], targets[special_vals_idx['regular']]
 
-        # need to adjust the format of the data for subsequent processing
-        non_nan_feats = non_nan_feats.squeeze()
-        non_nan_labels = non_nan_labels.squeeze()
-
-        if non_nan_feats.size > 0:
-            self._recurse(non_nan_feats, non_nan_labels, 0)
-            self._calculate_conditional_probas(non_nan_feats, non_nan_labels)
-            prior = np.bincount(non_nan_labels)[1] / len(non_nan_labels)
+        if non_special_vals.size > 0:
+            self._recurse(non_special_vals, non_special_labels, 0)
+            self._calculate_conditional_probas(non_special_vals, non_special_labels)
+            prior = np.bincount(non_special_labels)[1] / len(non_special_labels)
         else:
             prior = None
 
-        self._splits.append(np.NaN)
-        self._values.append(_process_nan_values(values, targets, prior))
+        for val in self.special_values:
+            self.add_bin(val, _naive_bayes_bins(targets[special_vals_idx[str(val)]], prior))
+
         self.is_fit = True
         return self
 

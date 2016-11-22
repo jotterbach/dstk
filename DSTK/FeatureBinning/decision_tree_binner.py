@@ -2,7 +2,7 @@ from __future__ import division
 import sklearn
 from sklearn.tree import DecisionTreeClassifier
 import numpy as np
-from DSTK.FeatureBinning._utils import _process_nan_values, _preprocess_values_and_targets
+from DSTK.FeatureBinning._utils import _process_nan_values, _get_non_nan_values_and_targets
 from DSTK.FeatureBinning.base_binner import BaseBinner
 
 
@@ -192,7 +192,7 @@ class DecisionTreeBinner(BaseBinner):
         assert (target is not None) & (target != []), "target_values cannot be None or empty"
         assert len(values) == len(target), "feature_values and target_values must have same length"
 
-        non_nan_feats, non_nan_labels = _preprocess_values_and_targets(values, target)
+        non_nan_feats, non_nan_labels = _get_non_nan_values_and_targets(values, target)
 
         if non_nan_feats.size > 0:
             self.dtc.fit(non_nan_feats, non_nan_labels)
