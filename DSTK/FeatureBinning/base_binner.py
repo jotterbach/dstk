@@ -49,7 +49,7 @@ class BaseBinner(object):
 
         # searchsorted on nan values gives wrong idx when input is nan
         # as it assumes the nan value is "right" of a nan split
-        idx[np.isnan(values)] -= 1
+        idx[np.where(np.isnan(values))[0]] -= 1
 
         if class_index:
             return np.asarray(self.values)[idx][:, class_index]
