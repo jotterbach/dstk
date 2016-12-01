@@ -9,4 +9,5 @@ install:
 # command to run tests
 script:
   - rm DSTK/tests/tests_gam/test_p_spline_train.py
+  - rm DSTK/tests/test_constrained_logit/test_constrained_logit.py
   - tox --sitepackages
