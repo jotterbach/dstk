@@ -60,7 +60,7 @@ class ConditionalInferenceBinner(BaseBinner):
     def __init__(self, name, **kwargs):
         self.name = name
 
-        self.alpha = kwargs.get('alpha', 0.05)
+        self.alpha = kwargs.get('alpha', 0.95)
         self.min_samples_split = kwargs.get('min_samples_split', 2)
         self.min_samples_leaf = kwargs.get('min_samples_leaf', 2)
         self.special_values = kwargs.get('special_values', [np.NaN])
@@ -154,9 +154,8 @@ class ConditionalInferenceBinner(BaseBinner):
             self._splits = np.insert(self._splits, idx, split_value).astype(np.float32).tolist()
 
     def _terminate_recursion(self, values, targets):
-        accept_null_hypothesis = not self._reject_null_hypothesis(values, targets, self.alpha)
         is_not_splittable = not ConditionalInferenceBinner._splittable(values, targets, self.min_samples_split)
-        return accept_null_hypothesis or is_not_splittable
+        return self._reject_null_hypothesis(values, targets, self.alpha) or is_not_splittable
 
     @staticmethod
     def _splittable(values, targets, min_samples):
@@ -185,7 +184,7 @@ class ConditionalInferenceBinner(BaseBinner):
 
     @staticmethod
     def _reject_null_hypothesis(values, target, alpha):
-        return np.abs(ConditionalInferenceBinner._get_pvalue(values, target)) <= alpha
+        return np.abs(ConditionalInferenceBinner._get_pvalue(values, target)) < alpha
 
     @staticmethod
     def _get_statistic(values, target):
@@ -193,4 +192,8 @@ class ConditionalInferenceBinner(BaseBinner):
 
     @staticmethod
     def _get_pvalue(values, target):
-        return st.pearsonr(values, target)[1]
+        # Our Null Hypothesis is that the data is strongly correlated.
+        # However `pearsonr` assumes NH to be UN-correlated data and calculates
+        # the p-value accordingly. To correct for that we return 1-pv as a probability
+        # for correlated data.
+        return 1-st.pearsonr(values, target)[1]
