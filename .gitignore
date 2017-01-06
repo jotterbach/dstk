@@ -3,6 +3,8 @@ build/
 dist/
 *.idea
 *.pyc
+*.so
+*.c
 *.html
 .cache
 .tox/
