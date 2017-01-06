@@ -14,8 +14,7 @@ def recurrence_map(np.ndarray[double, ndim=1, mode="c"] ts):
     cdef double[:, :] recMap = <double[:n, :n]>malloc((n ** 2) * sizeof(double));
     cdef double dist_val;
 
-
-    with nogil, parallel(num_threads=20):
+    with nogil, parallel(num_threads=None):
         for i in prange(n, schedule='dynamic'):
             for j in range(i, n):
                 if i == j:
