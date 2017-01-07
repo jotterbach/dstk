@@ -8,11 +8,11 @@ from Cython.Distutils import build_ext
 from Cython.Build import cythonize
 import numpy
 import os
-import subprocess
-import sys
+import platform
 
-os.environ["CC"] = "/usr/local/Cellar/gcc48/4.8.5/bin/gcc-4.8"
-os.environ["CXX"] = "/usr/local/Cellar/gcc48/4.8.5/bin/gcc-4.8"
+if platform.system() == 'Darwin':
+    os.environ["CC"] = "/usr/local/Cellar/gcc48/4.8.5/bin/gcc-4.8"
+    os.environ["CXX"] = "/usr/local/Cellar/gcc48/4.8.5/bin/gcc-4.8"
 
 
 extensions = [
