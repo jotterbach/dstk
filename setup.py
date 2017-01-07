@@ -3,7 +3,7 @@
 
 import DSTK
 from setuptools import setup, find_packages
-from distutils.extension import Extension
+from setuptools.extension import Extension
 from Cython.Distutils import build_ext
 from Cython.Build import cythonize
 import numpy
@@ -44,7 +44,8 @@ setup(
         'cython'
     ],
     tests_require=[
-        'pytest'
+        'pytest',
+        'cython'
     ],
     test_suite='DSTK.tests',
     dependency_links=[
