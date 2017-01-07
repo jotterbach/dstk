@@ -5,8 +5,9 @@ from libc.stdlib cimport malloc, free
 from libc.math cimport fabs
 from cython.parallel import prange, parallel
 
+
 @cython.boundscheck(False)
-def recurrence_map(np.ndarray[double, ndim=1, mode="c"] ts):
+def recurrence_map(np.ndarray[double, ndim=1, mode="c"] ts, int num_threads=None):
 
     cdef int n, i, j;
     n = ts.shape[0]
@@ -14,7 +15,7 @@ def recurrence_map(np.ndarray[double, ndim=1, mode="c"] ts):
     cdef double[:, :] recMap = <double[:n, :n]>malloc((n ** 2) * sizeof(double));
     cdef double dist_val;
 
-    with nogil, parallel(num_threads=None):
+    with nogil, parallel(num_threads=num_threads):
         for i in prange(n, schedule='dynamic'):
             for j in range(i, n):
                 if i == j:
