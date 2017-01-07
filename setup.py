@@ -41,6 +41,7 @@ setup(
         'futures',
         'statsmodels',
         'patsy',
+        'cython'
     ],
     tests_require=[
         'pytest'
