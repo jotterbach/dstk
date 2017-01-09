@@ -7,22 +7,17 @@ from cython.parallel import prange, parallel
 
 
 @cython.boundscheck(False)
-def recurrence_map(np.ndarray[double, ndim=1, mode="c"] ts):
+def recurrence_map(np.ndarray[double, ndim=1, mode="c"] ts1, np.ndarray[double, ndim=1, mode="c"] ts2):
 
-    cdef int n, i, j;
-    n = ts.shape[0]
+    cdef int n, m, i, j;
+    n = ts1.shape[0]
+    m = ts2.shape[0]
 
-    cdef double[:, :] recMap = <double[:n, :n]>malloc((n ** 2) * sizeof(double));
-    cdef double dist_val;
+    cdef double[:, :] recMap = <double[:n, :n]>malloc(n * m * sizeof(double));
 
     with nogil, parallel():
         for i in prange(n, schedule='dynamic'):
-            for j in range(i, n):
-                if i == j:
-                    recMap[i][j] = 0.0
-                else:
-                    dist_val = fabs(ts[i] - ts[j])
-                    recMap[i][j] = dist_val
-                    recMap[j][i] = dist_val
+            for j in range(m):
+                recMap[i][j] = fabs(ts1[i] - ts2[j])
 
     return np.asarray(recMap)
