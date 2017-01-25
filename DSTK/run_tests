@@ -1,0 +1,6 @@
+#!/bin/sh
+
+command -v coverage >/dev/null && coverage erase
+command -v python-coverage >/dev/null && python-coverage erase
+
+nosetests -v --with-coverage --cover-erase --cover-package=DSTK --cover-html $@ tests
