@@ -22,7 +22,7 @@ NaN: [ 0.37258348  0.62741652]"""
 def test_recursion():
     col = 'mean radius'
     data = cancer_df[col].values
-    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.05)
+    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.95)
     cib.fit(data, cancer_target)
 
     np.testing.assert_equal(cib.splits, [11.75, 13.079999923706055, 15.039999961853027, 16.84000015258789, np.PINF, np.NaN])
@@ -38,7 +38,7 @@ def test_recursion():
 def test_string_repr():
     col = 'mean radius'
     data = cancer_df[col].values
-    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.05)
+    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.95)
     cib.fit(data, cancer_target)
 
     assert str(cib) == assert_str
@@ -47,7 +47,7 @@ def test_string_repr():
 def test_adding_bin():
     col = 'mean radius'
     data = cancer_df[col].values
-    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.05)
+    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.95)
     cib.fit(data, cancer_target)
 
     cib.add_bin(-1.0, [0.1, 0.9])
@@ -80,7 +80,7 @@ def test_recursion_with_nan():
     rand_idx = np.linspace(1, 500, 23).astype(int)
     data[rand_idx] = np.NaN
 
-    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.05)
+    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.95)
     cib.fit(data, cancer_target)
 
     np.testing.assert_equal(cib.splits, [471.29998779296875, 555.0999755859375, 693.7000122070312, 880.2000122070312, np.PINF, np.NaN])
@@ -102,7 +102,7 @@ def test_recursion_with_nan_and_special_value():
     rand_idx_2 = np.linspace(1, 550, 29).astype(int)
     data[rand_idx_2] = -1.0
 
-    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.05, special_values=[-1.0, np.NaN])
+    cib = ConditionalInferenceBinner('test_dim_{}'.format(col), alpha=0.95, special_values=[-1.0, np.NaN])
     cib.fit(data, cancer_target)
 
     np.testing.assert_equal(cib.splits, [-1.0, 471.29998779296875, 572.2999877929688, 693.7000122070312, 819.7999877929688, np.PINF, np.NaN])
