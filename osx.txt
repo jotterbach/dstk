@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# tensorflow
+https://storage.googleapis.com/tensorflow/mac/cpu/tensorflow-0.12.0rc0-py2-none-any.whl

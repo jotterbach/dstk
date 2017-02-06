@@ -49,7 +49,7 @@ setup(
     ],
     test_suite='DSTK.tests',
     dependency_links=[
-        "https://storage.googleapis.com/tensorflow/mac/tensorflow-0.8.0-py2-none-any.whl"
+        "https://storage.googleapis.com/tensorflow/mac/cpu/tensorflow-0.12.0rc0-py2-none-any.whl"
     ],
     cmdclass={'build_ext': build_ext},
     ext_modules=cythonize(extensions)

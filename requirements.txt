@@ -8,9 +8,6 @@ statsmodels==0.6.0
 cython==0.25.2
 patsy
 
-# tensorflow
-https://storage.googleapis.com/tensorflow/mac/tensorflow-0.8.0-py2-none-any.whl
-
 # test dependencies
 pytest
 tox
