@@ -11,3 +11,5 @@ patsy
 # test dependencies
 pytest
 tox
+pytest-cov
+codeclimate-test-reporter
